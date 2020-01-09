@@ -18,6 +18,7 @@ To add new dataset, refer to the tutorial "docs/DATASETS.md".
 """
 
 import os
+from pathlib import Path
 
 from detectron2.data import MetadataCatalog, DatasetCatalog
 from .register_coco import register_coco_instances, register_coco_panoptic_separated
@@ -25,6 +26,7 @@ from .lvis import register_lvis_instances, get_lvis_instances_meta
 from .cityscapes import load_cityscapes_instances, load_cityscapes_semantic
 from .pascal_voc import register_pascal_voc
 from .builtin_meta import _get_builtin_metadata
+from .surface_signs import register_ssigns_instances, get_class_name
 
 
 # ==== Predefined datasets and splits for COCO ==========
@@ -208,8 +210,24 @@ def register_all_pascal_voc(root="datasets"):
         MetadataCatalog.get(name).evaluator_type = "pascal_voc"
 
 
+def register_all_ssigns():
+    """
+    Register surface_signs in json annotation format for detection.
+    """
+    dataset_dir = Path(__file__).parents[3] / "datasets" / "surface_signs" / "annotations"
+    split_file = "uca_split_unweighted"
+
+    for label_def in ["class_agnostic", "class_aware_150"]:
+        class_name = get_class_name(dataset_dir / f"label_def_{label_def}.txt")
+        json_file = dataset_dir / f"{label_def}_{split_file}_validation.json"
+        register_ssigns_instances(str(json_file), class_name, f"ssigns_val_{label_def}")
+        json_file = dataset_dir / f"{label_def}_{split_file}_training.json"
+        register_ssigns_instances(str(json_file), class_name, f"ssigns_train_{label_def}")
+
+
 # Register them all under "./datasets"
 register_all_coco()
 register_all_lvis()
 register_all_cityscapes()
 register_all_pascal_voc()
+register_all_ssigns()

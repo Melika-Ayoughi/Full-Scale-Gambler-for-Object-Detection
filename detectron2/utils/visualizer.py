@@ -277,6 +277,8 @@ class VisImage:
         # canvas.print_rgba(buf)
         # width, height = self.width, self.height
         # s = buf.getvalue()
+        if len(img.shape) == 2:
+            img = np.expand_dims(img, axis=2)
 
         buffer = np.frombuffer(s, dtype="uint8")
 

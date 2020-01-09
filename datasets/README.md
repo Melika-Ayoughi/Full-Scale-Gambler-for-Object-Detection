@@ -83,3 +83,26 @@ VOC20{07,12}/
   ImageSets/
   JPEGImages/
 ```
+
+## Surface signs dataset
+###Step by step:
+- Copy the label definition file to surface_signs/Annotation and make sure it is name with the format "label_def_{annotation_name}" format.
+- Copy the kitt format split file to surface_signs/Annotation as well.
+
+- Run the following code to transform the kitt format data split into coco format.
+    ```
+    python prepare_surface_signs.py --split_file {split_name} --label_def_file label_def_{annotation_name}
+    ```
+    The resulted coco format annotation would be saved in 
+    ```
+    surface_signs/
+    Annotations/
+    surface_signs_{annotation_name}{traning/validation/test}.json
+    ```
+- Register surface signs
+    Add the {annotation_name} to the List in 
+    ```
+    detectron2.data.datasets.builtin.register_all_ssigns() 
+    ```
+    to register the new data such that it can be used in training/inference.
+    The registered dataset would be with name "ssigns_{train/val}_{annotation_name}"

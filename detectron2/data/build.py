@@ -15,11 +15,11 @@ from detectron2.utils.comm import get_world_size
 from detectron2.utils.env import seed_all_rng
 from detectron2.utils.logger import log_first_n
 
-from . import samplers
-from .catalog import DatasetCatalog, MetadataCatalog
-from .common import DatasetFromList, MapDataset
-from .dataset_mapper import DatasetMapper
-from .detection_utils import check_metadata_consistency
+from detectron2.data import samplers
+from detectron2.data.catalog import DatasetCatalog, MetadataCatalog
+from detectron2.data.common import DatasetFromList, MapDataset
+from detectron2.data.dataset_mapper import DatasetMapper
+from detectron2.data.detection_utils import check_metadata_consistency
 
 """
 This file contains the default logic to build a dataloader for training or testing.
@@ -258,6 +258,7 @@ def get_detection_dataset_dicts(
             that match each dataset in `dataset_names`.
     """
     assert len(dataset_names)
+    print(dataset_names)
     dataset_dicts = [DatasetCatalog.get(dataset_name) for dataset_name in dataset_names]
     for dataset_name, dicts in zip(dataset_names, dataset_dicts):
         assert len(dicts), "Dataset '{}' is empty!".format(dataset_name)

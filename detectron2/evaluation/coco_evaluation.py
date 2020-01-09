@@ -7,6 +7,7 @@ import json
 import logging
 import numpy as np
 import os
+from pathlib import Path
 import pickle
 from collections import OrderedDict
 import pycocotools.mask as mask_util
@@ -48,7 +49,7 @@ class COCOEvaluator(DatasetEvaluator):
         """
         self._tasks = self._tasks_from_config(cfg)
         self._distributed = distributed
-        self._output_dir = output_dir
+        self._output_dir = Path(output_dir)
 
         self._cpu_device = torch.device("cpu")
         self._logger = logging.getLogger(__name__)
@@ -119,9 +120,9 @@ class COCOEvaluator(DatasetEvaluator):
             return {}
 
         if self._output_dir:
-            PathManager.mkdirs(self._output_dir)
-            file_path = os.path.join(self._output_dir, "instances_predictions.pth")
-            with PathManager.open(file_path, "wb") as f:
+            PathManager.mkdirs(str(self._output_dir))
+            file_path = self._output_dir / "instances_predictions.pth"
+            with file_path.open("wb") as f:
                 torch.save(self._predictions, f)
 
         self._results = OrderedDict()
@@ -155,11 +156,10 @@ class COCOEvaluator(DatasetEvaluator):
                 result["category_id"] = reverse_id_mapping[category_id]
 
         if self._output_dir:
-            file_path = os.path.join(self._output_dir, "coco_instances_results.json")
+            file_path = self._output_dir / "coco_instances_results.json"
             self._logger.info("Saving results to {}".format(file_path))
-            with PathManager.open(file_path, "w") as f:
-                f.write(json.dumps(self._coco_results))
-                f.flush()
+            with file_path.open("w") as f:
+                json.dump(self._coco_results, f, indent=2)
 
         if not self._do_evaluation:
             self._logger.info("Annotations are not available for evaluation.")

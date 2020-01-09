@@ -1,0 +1,31 @@
+_BASE_: "../Base-RCNN-FPN.yaml"
+MODEL:
+  WEIGHTS: "detectron2://ImageNetPretrained/MSRA/R-50.pkl"
+  MASK_ON: False
+  RESNETS:
+    DEPTH: 50
+  ROI_HEADS:
+    NUM_CLASSES: 1
+    SCORE_THRESH_TEST: 0.0001
+INPUT:
+  MIN_SIZE_TRAIN: (640,)
+  MAX_SIZE_TEST: 3200
+  MIN_SIZE_TEST: 1600
+  MAX_SIZE_TRAIN: 640
+  CROP:
+    ENABLED: True
+    TYPE: "absolute"
+    SIZE: [320, 320]
+DATASETS:
+  TRAIN: ("ssigns_train_class_agnostic",)
+  TEST: ("ssigns_val_class_agnostic",)
+
+SOLVER:
+  IMS_PER_BATCH: 16
+  BASE_LR: 0.02
+  STEPS: (20000, 30000)
+  MAX_ITER: 40000
+TEST:
+  DETECTIONS_PER_IMAGE: 100
+
+OUTPUT_DIR: "output/surface_signs/faster_rcnn_class_agnostic_2"
