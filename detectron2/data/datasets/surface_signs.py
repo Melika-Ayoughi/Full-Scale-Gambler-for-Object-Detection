@@ -1,7 +1,7 @@
 # Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
 import logging
 from pathlib import Path
-from typing import Dict
+from typing import Dict, List
 
 from detectron2.data import MetadataCatalog
 from detectron2.data.datasets import register_coco_instances, load_coco_json
@@ -15,7 +15,7 @@ This file contains functions to parse kitt-format surface signs annotations into
 __all__ = ["load_ssigns", "register_ssigns_instances"]
 
 
-def register_ssigns_instances(json_file: str, class_name: Dict[int, str], dataset_name: str):
+def register_ssigns_instances(json_file: str, class_name: List[str], dataset_name: str):
     """
     Register surface_signs in json annotation format for detection.
     """
@@ -47,12 +47,11 @@ def load_ssigns(json_file, dataset_name=None):
     return load_coco_json(json_file, "", dataset_name)
 
 
-def get_class_name(label_def_file: Path) -> Dict[int, str]:
+def get_class_name(label_def_file: Path) -> List[str]:
     with label_def_file.open() as f:
         content = [x.strip() for x in f.readlines()]
     class_names = [line_i.replace("/", "_") for line_i in content]
-    class_dict = {idx + 1: class_name for idx, class_name in enumerate(class_names)}
-    return class_dict
+    return class_names
 
 
 def visualize():

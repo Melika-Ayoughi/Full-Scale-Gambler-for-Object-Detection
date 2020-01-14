@@ -49,7 +49,7 @@ def permute_all_cls_and_box_to_N_HWA_K_and_concat(box_cls, box_delta, num_classe
     # take into account the way the labels were generated (with all feature maps
     # being concatenated as well)
     box_cls = cat(box_cls_flattened, dim=1).view(-1, num_classes)
-    box_delta = cat(box_delta_flattened, dim=1).view(-1, 4)
+    box_delta = cat(box_delta_flattened, dim=1).reshape(-1, 4)
     return box_cls, box_delta
 
 

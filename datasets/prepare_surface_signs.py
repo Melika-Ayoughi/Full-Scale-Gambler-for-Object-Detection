@@ -96,10 +96,10 @@ def convert_ssigns_coco_format(split_file: str, label_def_file: str) -> None:
                 coco_box = kitt2coco(bbox_coord, img_width=tile_width, img_height=tile_height)
                 box_area = coco_box[2] * coco_box[3]
                 label_id = get_label_id(lookup_table, bbox_i["label"])
-                if label_id >= 0:
+                if label_id > 0:
                     # ignore the box which is not included in the label_def_file
                     annotations_dict = {"segmentation": [], "area": box_area, 'iscrowd': 0,
-                                        'image_id': img_id, 'bbox': coco_box, 'category_id': label_id,
+                                        'image_id': img_id, 'bbox': coco_box, 'category_id': label_id - 1,
                                         'id': box_id}
                     annotations[split].append(annotations_dict)
                     box_id += 1
