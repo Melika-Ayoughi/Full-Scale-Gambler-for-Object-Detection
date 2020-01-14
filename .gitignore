@@ -38,6 +38,7 @@ dist/
 # project dirs
 /detectron2/model_zoo/configs
 /datasets
+/scripts/*.sh
 # do not ignore the *py in datasets
 !/datasets/*.py
 /models
