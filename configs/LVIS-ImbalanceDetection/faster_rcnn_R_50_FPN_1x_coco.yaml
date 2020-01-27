@@ -1,0 +1,12 @@
+_BASE_: "../Base-RCNN-FPN.yaml"
+MODEL:
+  WEIGHTS: "detectron2://ImageNetPretrained/MSRA/R-50.pkl"
+  MASK_ON: False
+  RESNETS:
+    DEPTH: 50
+TEST:
+  EVAL_PERIOD: 4500
+SOLVER:
+  IMS_PER_BATCH: 8
+  CHECKPOINT_PERIOD: 4500
+OUTPUT_DIR: "./output/faster_focal/faster_notfocal_coco"

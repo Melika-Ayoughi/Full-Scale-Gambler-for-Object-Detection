@@ -46,6 +46,8 @@ _PREDEFINED_SPLITS_COCO["coco"] = {
     "coco_2017_test": ("coco/test2017", "coco/annotations/image_info_test2017.json"),
     "coco_2017_test-dev": ("coco/test2017", "coco/annotations/image_info_test-dev2017.json"),
     "coco_2017_val_100": ("coco/val2017", "coco/annotations/instances_val2017_100.json"),
+    "coco_2017_train_100samples": ("coco/train2017", "coco/annotations/instances_train2017_100samples.json"),
+    "coco_2017_val_100samples": ("coco/val2017", "coco/annotations/instances_val2017_100samples.json"),
 }
 
 _PREDEFINED_SPLITS_COCO["coco_person"] = {
@@ -141,6 +143,7 @@ _PREDEFINED_SPLITS_LVIS = {
         "lvis_v0.5_val": ("coco/val2017", "lvis/lvis_v0.5_val.json"),
         "lvis_v0.5_val_rand_100": ("coco/val2017", "lvis/lvis_v0.5_val_rand_100.json"),
         "lvis_v0.5_test": ("coco/test2017", "lvis/lvis_v0.5_image_info_test.json"),
+        "lvis_v0.5_train_one_forth": ("coco/train2017", "lvis/lvis_v0.5_train_one_forth.json"),
     }
 }
 
@@ -230,4 +233,4 @@ register_all_coco()
 register_all_lvis()
 register_all_cityscapes()
 register_all_pascal_voc()
-register_all_ssigns()
+# register_all_ssigns()

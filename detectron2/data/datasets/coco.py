@@ -15,7 +15,7 @@ from detectron2.structures import BoxMode, PolygonMasks, Boxes
 from fvcore.common.file_io import PathManager
 
 
-from .. import MetadataCatalog, DatasetCatalog
+from detectron2.data import DatasetCatalog, MetadataCatalog
 
 """
 This file contains functions to parse COCO-format annotations into dicts in "Detectron2 format".
@@ -419,34 +419,92 @@ def convert_to_coco_json(dataset_name, output_folder="", allow_cached=True):
     return cache_path
 
 
-if __name__ == "__main__":
-    """
-    Test the COCO json dataset loader.
+# if __name__ == "__main__":
+#     """
+#     Test the COCO json dataset loader.
+#
+#     Usage:
+#         python -m detectron2.data.datasets.coco \
+#             path/to/json path/to/image_root dataset_name
+#
+#         "dataset_name" can be "coco_2014_minival_100", or other
+#         pre-registered ones
+#     """
+#     from detectron2.utils.logger import setup_logger
+#     from detectron2.utils.visualizer import Visualizer
+#     import detectron2.data.datasets  # noqa # add pre-defined metadata
+#     import sys
+#
+#     logger = setup_logger(name=__name__)
+#     assert sys.argv[3] in DatasetCatalog.list()
+#     meta = MetadataCatalog.get(sys.argv[3])
+#
+#     dicts = load_coco_json(sys.argv[1], sys.argv[2], sys.argv[3])
+#     logger.info("Done loading {} samples.".format(len(dicts)))
+#
+#     dirname = "coco-data-vis"
+#     os.makedirs(dirname, exist_ok=True)
+#     for d in dicts:
+#         img = np.array(Image.open(d["file_name"]))
+#         visualizer = Visualizer(img, metadata=meta)
+#         vis = visualizer.draw_dataset_dict(d)
+#         fpath = os.path.join(dirname, os.path.basename(d["file_name"]))
+#         vis.save(fpath)
 
-    Usage:
-        python -m detectron2.data.datasets.coco \
-            path/to/json path/to/image_root dataset_name
+def _search_dict_by_id(_dict, ids):
+    return [_dict[id] for id in ids]
 
-        "dataset_name" can be "coco_2014_minival_100", or other
-        pre-registered ones
+
+def build_toy_dataset_coco(json_input="instances_train2017", json_output="instances_train2017_100samples", sampling_rate=(1/1200)):
     """
+        Build a sampled version of COCO dataset for shorter training time.
+
+        Args:
+            json_input (str): full path to the COCO json annotation file.
+            json_output (str): full path to the save location of new json file.
+            sampling_rate (int): if sampling rate = 1/4, 1/4th of images are saved in json_output.
+
+        """
+    from pycocotools.coco import COCO
+    import json
+    import numpy as np
+    import os
     from detectron2.utils.logger import setup_logger
-    from detectron2.utils.visualizer import Visualizer
-    import detectron2.data.datasets  # noqa # add pre-defined metadata
-    import sys
 
     logger = setup_logger(name=__name__)
-    assert sys.argv[3] in DatasetCatalog.list()
-    meta = MetadataCatalog.get(sys.argv[3])
 
-    dicts = load_coco_json(sys.argv[1], sys.argv[2], sys.argv[3])
-    logger.info("Done loading {} samples.".format(len(dicts)))
+    cwd = os.getcwd()
+    logger.info("Starting to build the sampled COCO dataset, starting from {}".format(cwd))
+    annFile_input = './datasets/coco/annotations/{}.json'.format(json_input)
+    annFile_output = './datasets/coco/annotations/{}.json'.format(json_output)
 
-    dirname = "coco-data-vis"
-    os.makedirs(dirname, exist_ok=True)
-    for d in dicts:
-        img = np.array(Image.open(d["file_name"]))
-        visualizer = Visualizer(img, metadata=meta)
-        vis = visualizer.draw_dataset_dict(d)
-        fpath = os.path.join(dirname, os.path.basename(d["file_name"]))
-        vis.save(fpath)
+    # initialize LVIS api for instance annotations
+    coco = COCO(annFile_input)
+
+    # copy categories, info and licences from the original dataset
+    data = {"info": coco.dataset["info"], "images": [], "annotations": [], "categories": coco.dataset["categories"],
+            "licenses": coco.dataset["licenses"]}
+
+    logger.info("before permutation")
+    # select random image ids according to sampling rate
+    img_ids = np.random.permutation(list(coco.imgs.keys()))
+    logger.info("before randomizing")
+    img_ids = np.random.choice(img_ids, size=round(len(img_ids) * sampling_rate), replace=False)
+
+    logger.info("before selecting images in dict")
+    # adding selected images to the json file
+    data["images"] = _search_dict_by_id(coco.imgs, img_ids)
+
+    logger.info("before filtering annotations")
+    # adding corresponding annotations to json file
+    for imgid in img_ids:
+        for ann in coco.imgToAnns[imgid]:
+            data["annotations"].append(ann)
+
+    logger.info("before writing into the file")
+    with open(annFile_output, 'w') as outfile:
+        json.dump(data, outfile, indent=4)
+
+
+if __name__ == "__main__":
+    build_toy_dataset_coco()

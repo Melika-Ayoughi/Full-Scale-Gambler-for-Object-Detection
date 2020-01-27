@@ -175,32 +175,94 @@ def _get_lvis_instances_meta_v0_5():
     return meta
 
 
-if __name__ == "__main__":
-    """
-    Test the LVIS json dataset loader.
+# if __name__ == "__main__":
+#     """
+#     Test the LVIS json dataset loader.
+#
+#     Usage:
+#         python -m detectron2.data.datasets.lvis \
+#             path/to/json path/to/image_root dataset_name vis_limit
+#     """
+#     import sys
+#     import numpy as np
+#     from detectron2.utils.logger import setup_logger
+#     from PIL import Image
+#     import detectron2.data.datasets  # noqa # add pre-defined metadata
+#     from detectron2.utils.visualizer import Visualizer
+#
+#     logger = setup_logger(name=__name__)
+#     meta = MetadataCatalog.get(sys.argv[3])
+#
+#     dicts = load_lvis_json(sys.argv[1], sys.argv[2], sys.argv[3])
+#     logger.info("Done loading {} samples.".format(len(dicts)))
+#
+#     dirname = "lvis-data-vis"
+#     os.makedirs(dirname, exist_ok=True)
+#     for d in dicts[: int(sys.argv[4])]:
+#         img = np.array(Image.open(d["file_name"]))
+#         visualizer = Visualizer(img, metadata=meta)
+#         vis = visualizer.draw_dataset_dict(d)
+#         fpath = os.path.join(dirname, os.path.basename(d["file_name"]))
+#         vis.save(fpath)
 
-    Usage:
-        python -m detectron2.data.datasets.lvis \
-            path/to/json path/to/image_root dataset_name vis_limit
+def _search_dict_by_id(_dict, ids):
+    return [_dict[id] for id in ids]
+
+
+# def _filter_ann_by_imgid(anns, imgids):
+#     return [anns[ann_id] for ann_id in anns for imgid in imgids if (anns[ann_id]["image_id"] == imgid)]
+
+
+def build_toy_dataset_lvis(json_input="lvis_v0.5_train", json_output="lvis_v0.5_train_one_forth_new", sampling_rate=0.25):
     """
-    import sys
+        Build a sampled version of LVIS dataset for shorter training time.
+
+        Args:
+            json_input (str): full path to the LVIS json annotation file.
+            json_output (str): full path to the save location of new json file.
+            sampling_rate (int): if sampling rate = 1/4, 1/4th of images are saved in json_output.
+
+        """
+    from lvis import LVIS
+    import json
     import numpy as np
+    import os
     from detectron2.utils.logger import setup_logger
-    from PIL import Image
-    import detectron2.data.datasets  # noqa # add pre-defined metadata
-    from detectron2.utils.visualizer import Visualizer
 
     logger = setup_logger(name=__name__)
-    meta = MetadataCatalog.get(sys.argv[3])
 
-    dicts = load_lvis_json(sys.argv[1], sys.argv[2], sys.argv[3])
-    logger.info("Done loading {} samples.".format(len(dicts)))
+    cwd = os.getcwd()
+    logger.info("Starting to build the sampled LVIS dataset, starting from {}".format(cwd))
+    annFile_input = './datasets/lvis/{}.json'.format(json_input)
+    annFile_output = './datasets/lvis/{}.json'.format(json_output)
 
-    dirname = "lvis-data-vis"
-    os.makedirs(dirname, exist_ok=True)
-    for d in dicts[: int(sys.argv[4])]:
-        img = np.array(Image.open(d["file_name"]))
-        visualizer = Visualizer(img, metadata=meta)
-        vis = visualizer.draw_dataset_dict(d)
-        fpath = os.path.join(dirname, os.path.basename(d["file_name"]))
-        vis.save(fpath)
+    # initialize LVIS api for instance annotations
+    lvis = LVIS(annFile_input)
+
+    # copy categories, info and licences from the original dataset
+    data = {"info": lvis.dataset["info"], "images": [], "annotations": [], "categories": lvis.dataset["categories"],
+            "licenses": lvis.dataset["licenses"]}
+
+    logger.info("before permutation")
+    # select random image ids according to sampling rate
+    img_ids = np.random.permutation(list(lvis.imgs.keys()))
+    logger.info("before randomizing")
+    img_ids = np.random.choice(img_ids, size=round(len(img_ids) * sampling_rate), replace=False)
+
+    logger.info("before selecting images in dict")
+    # adding selected images to the json file
+    data["images"] = _search_dict_by_id(lvis.imgs, img_ids)
+
+    logger.info("before filtering annotations")
+    # adding corresponding annotations to json file
+    for imgid in img_ids:
+        for ann in lvis.img_ann_map[imgid]:
+            data["annotations"].append(ann)
+
+    logger.info("before writing into the file")
+    with open(annFile_output, 'w') as outfile:
+        json.dump(data, outfile, indent=4)
+
+
+if __name__ == "__main__":
+    build_toy_dataset_lvis()

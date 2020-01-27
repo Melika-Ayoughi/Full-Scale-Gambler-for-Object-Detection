@@ -143,6 +143,8 @@ class ROIHeads(torch.nn.Module):
         self.feature_channels         = {k: v.channels for k, v in input_shape.items()}
         self.cls_agnostic_bbox_reg    = cfg.MODEL.ROI_BOX_HEAD.CLS_AGNOSTIC_BBOX_REG
         self.smooth_l1_beta           = cfg.MODEL.ROI_BOX_HEAD.SMOOTH_L1_BETA
+        self.focal_loss_gamma = cfg.MODEL.RETINANET.FOCAL_LOSS_GAMMA
+        self.focal_loss_alpha = cfg.MODEL.RETINANET.FOCAL_LOSS_ALPHA
         # fmt: on
 
         # Matcher to assign box proposals to gt boxes
@@ -627,6 +629,8 @@ class StandardROIHeads(ROIHeads):
             pred_proposal_deltas,
             proposals,
             self.smooth_l1_beta,
+            focal_loss_gamma=self.focal_loss_gamma,
+            focal_loss_alpha=self.focal_loss_alpha,
         )
         if self.training:
             return outputs.losses()

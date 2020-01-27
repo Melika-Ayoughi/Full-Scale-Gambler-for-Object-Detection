@@ -65,10 +65,22 @@ class FastRCNNConvFCHead(nn.Module):
             self.fcs.append(fc)
             self._output_size = fc_dim
 
-        for layer in self.conv_norm_relus:
-            weight_init.c2_msra_fill(layer)
-        for layer in self.fcs:
-            weight_init.c2_xavier_fill(layer)
+            # Use prior in model initialization to improve stability
+            for layer in self.conv_norm_relus:
+                # torch.nn.init.normal_(layer.weight, mean=0, std=0.01)
+                # torch.nn.init.constant_(layer.bias, 0)
+                weight_init.c2_msra_fill(layer)  # todo
+            for layer in self.fcs:
+                # torch.nn.init.normal_(layer.weight, mean=0, std=0.01)
+                # torch.nn.init.constant_(layer.bias, 0)
+                weight_init.c2_xavier_fill(layer)  # todo
+
+            # import math
+            # prior_prob       = cfg.MODEL.RETINANET.PRIOR_PROB
+            #
+            # # the last layer is initialized differently
+            # bias_value = -math.log((1 - prior_prob) / prior_prob)
+            # torch.nn.init.constant_(self.fcs[-1].bias, bias_value)
 
     def forward(self, x):
         for layer in self.conv_norm_relus:

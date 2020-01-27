@@ -1,0 +1,20 @@
+_BASE_: "../Base-RetinaNet.yaml"
+MODEL:
+  WEIGHTS: "detectron2://ImageNetPretrained/MSRA/R-50.pkl"
+  RESNETS:
+    DEPTH: 50
+  ROI_HEADS:
+    NUM_CLASSES: 1230
+    SCORE_THRESH_TEST: 0.0001
+DATASETS:
+  TRAIN: ("lvis_v0.5_train_one_forth",)
+  TEST: ("lvis_v0.5_val",)
+TEST:
+  DETECTIONS_PER_IMAGE: 300  # LVIS allows up to 300
+SOLVER:
+  IMS_PER_BATCH: 16
+  BASE_LR: 0.01
+  STEPS: (7500, 10000)
+  MAX_ITER: 11300
+  CHECKPOINT_PERIOD: 570
+OUTPUT_DIR: "./output/retinanet"
