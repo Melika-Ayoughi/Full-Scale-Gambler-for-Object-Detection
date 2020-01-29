@@ -306,6 +306,20 @@ def instances_to_coco_json(instances, img_id):
     scores = instances.scores.tolist()
     classes = instances.pred_classes.tolist()
 
+    has_iou = instances.has("iou")
+    if has_iou:
+        iou_all = instances.iou.tolist()
+
+    has_gt = instances.has("gt_box")
+    if has_gt:
+        gt_list = instances.gt_box.tolist()
+
+    has_anchor = instances.has("anchor_boxes")
+    if has_anchor:
+        anchor_boxes = instances.anchor_boxes.tensor.numpy()
+        anchor_boxes = BoxMode.convert(anchor_boxes, BoxMode.XYXY_ABS, BoxMode.XYWH_ABS)
+        anchor_boxes_list = anchor_boxes.tolist()
+
     has_mask = instances.has("pred_masks")
     if has_mask:
         # use RLE to encode the masks, because they are too large and takes memory
@@ -343,7 +357,16 @@ def instances_to_coco_json(instances, img_id):
             # This is the inverse of data loading logic in `datasets/coco.py`.
             keypoints[k][:, :2] -= 0.5
             result["keypoints"] = keypoints[k].flatten().tolist()
+
+        if has_iou:
+            result["iou"] = iou_all[k]
+        if has_gt:
+            result["gt_box"] = gt_list[k]
+        if has_anchor:
+            result["anchor_box"] = anchor_boxes_list[k]
+
         results.append(result)
+
     return results
 
 

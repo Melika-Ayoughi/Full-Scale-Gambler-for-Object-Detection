@@ -7,9 +7,11 @@ typical object detection data pipeline.
 """
 import logging
 import numpy as np
+import itertools
 import torch
 from fvcore.common.file_io import PathManager
 from PIL import Image, ImageOps
+from typing import Iterator, Tuple
 
 from detectron2.structures import (
     BitMasks,
@@ -19,6 +21,7 @@ from detectron2.structures import (
     Keypoints,
     PolygonMasks,
     RotatedBoxes,
+    pairwise_iou,
 )
 
 from . import transforms as T
@@ -29,6 +32,70 @@ class SizeMismatchError(ValueError):
     """
     When loaded image has difference width/height compared with annotation.
     """
+
+
+def shift_pad_input(
+    image: np.ndarray,
+    gt_box: np.ndarray,
+    output_size: Tuple[int, int],
+    shift_range: int,
+) -> Iterator[Tuple[np.ndarray, np.ndarray, Tuple[int, int]]]:
+    """
+    Generator to shift(horizontally and vertically up to shift_range)
+    and zero-pad image to the expected output_size if gt_box exist.
+    Each iteration returns the shifted-padded image,
+    the updated ground truth box coordinates, and the shift value.
+    If gt_box is None, return the original image.
+    """
+    if gt_box is None:
+        yield image, gt_box, (0, 0)
+    image_size = image.shape
+    one_side_pad = (
+        (output_size[0] - (image_size[0] + shift_range)) // 2,
+        (output_size[1] - (image_size[1] + shift_range)) // 2,
+    )
+    for shift_i in itertools.product(range(shift_range), repeat=2):
+        pad_dim = [
+            (one_side_pad[0] + shift_i[0], one_side_pad[0] + shift_range - shift_i[0]),
+            (one_side_pad[1] + shift_i[1], one_side_pad[1] + shift_range - shift_i[1]),
+        ]
+        if len(image_size) == 3:
+            pad_dim.append((0, 0))
+        output = np.pad(image, pad_dim, "constant", constant_values=0)
+        gt_new = gt_box + np.array(
+            [pad_dim[1][0], pad_dim[0][0], pad_dim[1][0], pad_dim[0][0]]
+        )
+        yield output, gt_new, shift_i
+
+
+def filter_prediction_with_gt(instances: Instances, gt_box: np.ndarray) -> Instances:
+    """
+    "Computes the prediction with the highest IoU with the given ground truth box
+    and returns it (if present)."
+    """
+    filtered_instances = Instances(instances.image_size)
+    if len(instances) > 0:
+        pred_boxes = instances.pred_boxes
+        gt_box_tensor = torch.as_tensor(gt_box).reshape(1, 4)
+        gt_box_xywh = BoxMode.convert(gt_box_tensor, BoxMode.XYXY_ABS, BoxMode.XYWH_ABS)
+        gt_boxes = Boxes(gt_box_tensor)
+
+        iou = pairwise_iou(pred_boxes, gt_boxes)
+        max_iou, max_index = iou.max(0)
+
+        if max_iou > 0:
+            filtered_instances.set("pred_boxes", pred_boxes[max_index, :])
+            filtered_instances.set("scores", instances.scores[max_index])
+            filtered_instances.set("pred_classes", instances.pred_classes[max_index])
+            filtered_instances.set("iou", max_iou)
+            filtered_instances.set("gt_box", gt_box_xywh)
+            if instances.has("anchor_boxes"):
+                filtered_instances.set("anchor_boxes", instances.anchor_boxes[max_index])
+        else:
+            filtered_instances.set("pred_boxes", [])
+    else:
+        filtered_instances.set("pred_boxes", [])
+    return filtered_instances
 
 
 def read_image(file_name, format=None):
@@ -93,7 +160,9 @@ def check_image_size(dataset_dict, image):
         dataset_dict["height"] = image.shape[0]
 
 
-def transform_proposals(dataset_dict, image_shape, transforms, min_box_side_len, proposal_topk):
+def transform_proposals(
+    dataset_dict, image_shape, transforms, min_box_side_len, proposal_topk
+):
     """
     Apply transformations to the proposals in dataset_dict, if any.
 
@@ -159,7 +228,9 @@ def transform_instance_annotations(
             transformed according to `transforms`.
             The "bbox_mode" field will be set to XYXY_ABS.
     """
-    bbox = BoxMode.convert(annotation["bbox"], annotation["bbox_mode"], BoxMode.XYXY_ABS)
+    bbox = BoxMode.convert(
+        annotation["bbox"], annotation["bbox_mode"], BoxMode.XYXY_ABS
+    )
     # Note that bbox is 1d (per-instance bounding box)
     annotation["bbox"] = transforms.apply_box([bbox])[0]
     annotation["bbox_mode"] = BoxMode.XYXY_ABS
@@ -167,7 +238,9 @@ def transform_instance_annotations(
     if "segmentation" in annotation:
         # each instance contains 1 or more polygons
         polygons = [np.asarray(p).reshape(-1, 2) for p in annotation["segmentation"]]
-        annotation["segmentation"] = [p.reshape(-1) for p in transforms.apply_polygons(polygons)]
+        annotation["segmentation"] = [
+            p.reshape(-1) for p in transforms.apply_polygons(polygons)
+        ]
 
     if "keypoints" in annotation:
         keypoints = transform_keypoint_annotations(
@@ -178,7 +251,9 @@ def transform_instance_annotations(
     return annotation
 
 
-def transform_keypoint_annotations(keypoints, transforms, image_size, keypoint_hflip_indices=None):
+def transform_keypoint_annotations(
+    keypoints, transforms, image_size, keypoint_hflip_indices=None
+):
     """
     Transform keypoint annotations of an image.
 
@@ -193,7 +268,9 @@ def transform_keypoint_annotations(keypoints, transforms, image_size, keypoint_h
     keypoints[:, :2] = transforms.apply_coords(keypoints[:, :2])
 
     # This assumes that HorizFlipTransform is the only one that does flip
-    do_hflip = sum(isinstance(t, T.HFlipTransform) for t in transforms.transforms) % 2 == 1
+    do_hflip = (
+        sum(isinstance(t, T.HFlipTransform) for t in transforms.transforms) % 2 == 1
+    )
 
     # Alternative way: check if probe points was horizontally flipped.
     # probe = np.asarray([[0.0, 0.0], [image_width, 0.0]])
@@ -228,7 +305,10 @@ def annotations_to_instances(annos, image_size, mask_format="polygon"):
             "gt_masks", "gt_keypoints", if they can be obtained from `annos`.
             This is the format that builtin models expect.
     """
-    boxes = [BoxMode.convert(obj["bbox"], obj["bbox_mode"], BoxMode.XYXY_ABS) for obj in annos]
+    boxes = [
+        BoxMode.convert(obj["bbox"], obj["bbox_mode"], BoxMode.XYXY_ABS)
+        for obj in annos
+    ]
     target = Instances(image_size)
     boxes = target.gt_boxes = Boxes(boxes)
     boxes.clip(image_size)
@@ -376,7 +456,9 @@ def check_metadata_consistency(key, dataset_names):
     for idx, entry in enumerate(entries_per_dataset):
         if entry != entries_per_dataset[0]:
             logger.error(
-                "Metadata '{}' for dataset '{}' is '{}'".format(key, dataset_names[idx], str(entry))
+                "Metadata '{}' for dataset '{}' is '{}'".format(
+                    key, dataset_names[idx], str(entry)
+                )
             )
             logger.error(
                 "Metadata '{}' for dataset '{}' is '{}'".format(
@@ -403,9 +485,9 @@ def build_transform_gen(cfg, is_train):
         max_size = cfg.INPUT.MAX_SIZE_TEST
         sample_style = "choice"
     if sample_style == "range":
-        assert len(min_size) == 2, "more than 2 ({}) min_size(s) are provided for ranges".format(
-            len(min_size)
-        )
+        assert (
+            len(min_size) == 2
+        ), "more than 2 ({}) min_size(s) are provided for ranges".format(len(min_size))
 
     logger = logging.getLogger(__name__)
     tfm_gens = [T.ResizeShortestEdge(min_size, max_size, sample_style)]

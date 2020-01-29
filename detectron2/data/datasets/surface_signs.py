@@ -1,10 +1,14 @@
 # Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
 import logging
+import copy
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 from detectron2.data import MetadataCatalog
 from detectron2.data.datasets import register_coco_instances, load_coco_json
+
+SPLIT_DICT = {"training": [], "validation": [], "test": []}
+TILE_SIZE = (800, 1500)
 
 
 """
@@ -12,7 +16,15 @@ This file contains functions to parse kitt-format surface signs annotations into
 "Detectron2 format".
 """
 
-__all__ = ["load_ssigns", "register_ssigns_instances"]
+__all__ = [
+    "load_ssigns",
+    "register_ssigns_instances",
+    "dataset_read",
+    "get_category",
+    "get_label_id",
+    "SPLIT_DICT",
+    "TILE_SIZE",
+]
 
 
 def register_ssigns_instances(json_file: str, class_name: List[str], dataset_name: str):
@@ -85,6 +97,53 @@ def visualize():
             fpath = dirname / d["file_name"].replace("/", "_")
             vis.save(str(fpath))
             num_vis += 1
+
+
+def get_label_id(
+    lookup_table: Dict[str, int], label_name: str, default_value=-1
+) -> int:
+    if label_name == "":
+        return default_value
+    if label_name in lookup_table:
+        return lookup_table[label_name]
+    else:
+        parent_label_name = "/".join(label_name.split("/")[:-1])
+        return get_label_id(lookup_table, parent_label_name)
+
+
+def get_category(label_def_file: Path) -> Tuple[List[Dict], Dict]:
+    """
+    Returns the list of categories, and a lookup table that for each
+    category/sub_category/value in {label_def_file}, contains that assigned label id.
+    """
+    with label_def_file.open() as f:
+        content = [x.strip() for x in f.readlines()]
+    categories = []
+    lookup_table = {}
+    for idx, line_i in enumerate(content):
+        category = {
+            "supercategory": "ssigns",
+            "id": idx + 1,
+            "name": line_i.replace("/", "_"),
+        }
+        categories.append(category)
+        for word_i in line_i.split("|"):
+            if word_i:
+                lookup_table.update({word_i.strip(): category["id"]})
+    return categories, lookup_table
+
+
+def dataset_read(split_file: Path) -> Dict[str, List[str]]:
+    comment_char = "#"
+    sections: Dict[str, List[str]] = copy.deepcopy(SPLIT_DICT)
+    current_section: List[str] = []
+    with split_file.open() as file:
+        for line in map(str.strip, file):
+            if len(line) > 2 and line[0] == "[" and line[-1] == "]":
+                current_section = sections[line[1:-1]]
+            elif line and (line[0] != comment_char):
+                current_section.append(line)
+    return sections
 
 
 if __name__ == "__main__":

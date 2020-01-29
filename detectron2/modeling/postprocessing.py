@@ -32,6 +32,11 @@ def detector_postprocess(results, output_height, output_width, mask_threshold=0.
     elif results.has("proposal_boxes"):
         output_boxes = results.proposal_boxes
 
+    if results.has("anchor_boxes"):
+        anchor_boxes = results.anchor_boxes
+        anchor_boxes.scale(scale_x, scale_y)
+        anchor_boxes.clip(results.image_size)
+
     output_boxes.scale(scale_x, scale_y)
     output_boxes.clip(results.image_size)
 
