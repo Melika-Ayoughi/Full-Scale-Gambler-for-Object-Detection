@@ -254,6 +254,29 @@ class FastRCNNOutputs(object):
         loss_box_reg = loss_box_reg / self.gt_classes.numel()
         return loss_box_reg
 
+    def focal_loss(self):
+        from fvcore.nn import sigmoid_focal_loss
+        self._log_accuracy()
+
+        bg_class_ind = self.pred_class_logits.shape[1] - 1
+        fg_inds = (self.gt_classes >= 0) & (self.gt_classes < bg_class_ind)
+        num_foreground = fg_inds.nonzero().numel()
+
+        gt_classes_target = torch.zeros_like(self.pred_class_logits)
+        gt_classes_target[fg_inds, self.gt_classes[fg_inds]] = 1
+
+        fg_class_logits = self.pred_class_logits[:, 0:(bg_class_ind+1)]
+        fg_class_gt = gt_classes_target[:, 0:(bg_class_ind+1)]
+        loss_cls = sigmoid_focal_loss(
+            fg_class_logits,
+            fg_class_gt,
+            alpha=-1,
+            gamma=1,
+            reduction="sum",
+        ) / max(1, num_foreground)
+        logger.info(f"sig,oid loss between logit {fg_class_logits.shape} and gt {fg_class_gt.shape}")
+        return loss_cls
+
     def losses(self):
         """
         Compute the default losses for box head in Fast(er) R-CNN,
@@ -263,7 +286,7 @@ class FastRCNNOutputs(object):
             A dict of losses (scalar tensors) containing keys "loss_cls" and "loss_box_reg".
         """
         return {
-            "loss_cls": self.softmax_cross_entropy_loss(),
+            "loss_cls": self.focal_loss(),
             "loss_box_reg": self.smooth_l1_loss(),
         }
 
@@ -341,8 +364,14 @@ class FastRCNNOutputLayers(nn.Module):
 
         nn.init.normal_(self.cls_score.weight, std=0.01)
         nn.init.normal_(self.bbox_pred.weight, std=0.001)
-        for l in [self.cls_score, self.bbox_pred]:
+        for l in [self.bbox_pred]:
             nn.init.constant_(l.bias, 0)
+        import math
+        prior_prob = 0.01  # cfg.MODEL.RETINANET.PRIOR_PROB
+
+        # the last layer is initialized differently
+        bias_value = -math.log((1 - prior_prob) / prior_prob)
+        torch.nn.init.constant_(self.cls_score.bias, bias_value)
 
     def forward(self, x):
         if x.dim() > 2:
