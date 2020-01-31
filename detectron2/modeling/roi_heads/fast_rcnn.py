@@ -265,8 +265,8 @@ class FastRCNNOutputs(object):
         gt_classes_target = torch.zeros_like(self.pred_class_logits)
         gt_classes_target[fg_inds, self.gt_classes[fg_inds]] = 1
 
-        fg_class_logits = self.pred_class_logits[:, 0:(bg_class_ind+1)]
-        fg_class_gt = gt_classes_target[:, 0:(bg_class_ind+1)]
+        fg_class_logits = self.pred_class_logits[:, 0:bg_class_ind]
+        fg_class_gt = gt_classes_target[:, 0:bg_class_ind]
         loss_cls = sigmoid_focal_loss(
             fg_class_logits,
             fg_class_gt,

@@ -15,3 +15,6 @@ DATASETS:
 DATALOADER:
   # proposals are part of the dataset_dicts, and take a lot of RAM
   NUM_WORKERS: 2
+
+TEST:
+    EVAL_PERIOD: 2000
