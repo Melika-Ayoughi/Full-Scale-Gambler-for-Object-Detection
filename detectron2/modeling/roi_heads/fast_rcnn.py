@@ -270,11 +270,11 @@ class FastRCNNOutputs(object):
         loss_cls = sigmoid_focal_loss(
             fg_class_logits,
             fg_class_gt,
-            alpha=-1,
-            gamma=1,
+            alpha=0.25,
+            gamma=2,
             reduction="sum",
         ) / max(1, num_foreground)
-        return loss_cls / 10
+        return loss_cls
 
     def losses(self):
         """
