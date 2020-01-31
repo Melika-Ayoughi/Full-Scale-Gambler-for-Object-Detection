@@ -274,8 +274,7 @@ class FastRCNNOutputs(object):
             gamma=1,
             reduction="sum",
         ) / max(1, num_foreground)
-        logger.info(f"sig,oid loss between logit {fg_class_logits.shape} and gt {fg_class_gt.shape}")
-        return loss_cls
+        return loss_cls / 10
 
     def losses(self):
         """
