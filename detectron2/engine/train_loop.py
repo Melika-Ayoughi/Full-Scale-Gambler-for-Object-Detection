@@ -224,7 +224,7 @@ class SimpleTrainer(TrainerBase):
         self.optimizer.zero_grad()
         losses.backward()
 
-        # torch.nn.utils.clip_grad_norm_(self.model.parameters(), 5)
+        torch.nn.utils.clip_grad_norm_(self.model.parameters(), 5)
         """
         If you need gradient clipping/scaling or other processing, you can
         wrap the optimizer with your custom `step()` method.

@@ -48,7 +48,7 @@ def permute_all_cls_and_box_to_N_HWA_K_and_concat(box_cls, box_delta, num_classe
     # concatenate on the first dimension (representing the feature levels), to
     # take into account the way the labels were generated (with all feature maps
     # being concatenated as well)
-    box_cls = cat(box_cls_flattened, dim=1).view(-1, num_classes)
+    box_cls = cat(box_cls_flattened, dim=1).reshape(-1, num_classes)
     box_delta = cat(box_delta_flattened, dim=1).reshape(-1, 4)
     return box_cls, box_delta
 
@@ -134,7 +134,7 @@ class RetinaNet(nn.Module):
 
         if self.training:
             gt_classes, gt_anchors_reg_deltas = self.get_ground_truth(anchors, gt_instances)
-            return self.losses(gt_classes, gt_anchors_reg_deltas, box_cls, box_delta)
+            return images.tensor, {"pred_class_logits": box_cls, "pred_proposal_deltas": box_delta}, None,  self.losses(gt_classes, gt_anchors_reg_deltas, box_cls, box_delta)
         else:
             results = self.inference(box_cls, box_delta, anchors, images)
             processed_results = []
@@ -145,7 +145,7 @@ class RetinaNet(nn.Module):
                 width = input_per_image.get("width", image_size[1])
                 r = detector_postprocess(results_per_image, height, width)
                 processed_results.append({"instances": r})
-            return processed_results
+            return images.tensor, {"pred_class_logits": box_cls, "pred_proposal_deltas": box_delta}, None, processed_results
 
     def losses(self, gt_classes, gt_anchors_deltas, pred_class_logits, pred_anchor_deltas):
         """
