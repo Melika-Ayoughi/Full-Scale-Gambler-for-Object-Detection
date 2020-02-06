@@ -186,9 +186,9 @@ class RetinaNet(nn.Module):
 
     def ce_losses(self, gt_classes, gt_anchors_deltas, pred_class_logits, pred_anchor_deltas):
         return {
-            # "loss_cls": self.softmax_cross_entropy_loss(gt_classes, pred_class_logits),
-            "loss_box_reg": self.smooth_l1_loss(gt_classes, gt_anchors_deltas, pred_anchor_deltas),
             "loss_cls": self.softmax_cross_entropy_loss(gt_classes, pred_class_logits),
+            "loss_box_reg": self.smooth_l1_loss(gt_classes, gt_anchors_deltas, pred_anchor_deltas),
+            # "loss_cls": self.softmax_cross_entropy_loss(gt_classes, pred_class_logits),
         }
 
     def losses(self, gt_classes, gt_anchors_deltas, pred_class_logits, pred_anchor_deltas):
@@ -289,7 +289,8 @@ class RetinaNet(nn.Module):
                 # Anchors with label 0 are treated as background.
                 gt_classes_i[anchor_labels == 0] = self.num_classes
                 # Anchors with label -1 are ignored.
-                gt_classes_i[anchor_labels == -1] = -1
+                if (anchor_labels == -1).any():
+                    gt_classes_i[anchor_labels == -1] = self.num_classes #todo check: instead of -1 set them to bg
             else:
                 gt_classes_i = torch.zeros_like(gt_matched_idxs) + self.num_classes
                 gt_anchors_reg_deltas_i = torch.zeros_like(anchors_per_image.tensor)

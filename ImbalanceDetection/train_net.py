@@ -301,8 +301,9 @@ class GANTrainer(TrainerBase):
             betting_map = self.gambler_model(gambler_input)
 
             # weighting the loss with the output of the gambler
-            weighted_loss = torch.nn.CrossEntropyLoss(weight=betting_map, reduction="none") # todo: test, does this work?
-            loss_gambler = weighted_loss(generated_output['pred_class_logits'][0]), gt_classes)
+            # todo: test, does this work?
+            weighted_loss = torch.nn.CrossEntropyLoss(weight=betting_map, reduction="none")
+            loss_gambler = weighted_loss((generated_output['pred_class_logits'][0]), gt_classes)
 
             loss_detector = sum(loss for loss in loss_dict.values())
             self._detect_anomaly(loss_detector, loss_dict)
