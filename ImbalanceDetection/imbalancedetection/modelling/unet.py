@@ -8,6 +8,11 @@ import torch.nn.functional as F
 
 
 class UNet(nn.Module):
+    """
+    Args:
+        n_channels: int number of input channels
+        n_classes: int number of output channels
+    """
     def __init__(self, n_channels, n_classes, bilinear=True):
         super(UNet, self).__init__()
         self.n_channels = n_channels
@@ -27,6 +32,15 @@ class UNet(nn.Module):
         self.outc = OutConv(64, n_classes)
 
     def forward(self, x):
+        """
+        considering N is batch_size.
+        Args:
+            x: Tensor (N, C_in, H, W)
+
+        Returns:
+            logits: Tensor (N, C_out, H_out, W_out)
+
+        """
         x1 = self.inc(x)
         x2 = self.down1(x1)
         x3 = self.down2(x2)

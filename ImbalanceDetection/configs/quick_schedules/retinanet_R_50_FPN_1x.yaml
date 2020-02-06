@@ -28,4 +28,4 @@ SOLVER:
   STEPS: (3500, 4500)
   MAX_ITER: 5000
 #  CHECKPOINT_PERIOD: 250
-OUTPUT_DIR: "./output/debug_gambler_retinanet"
+OUTPUT_DIR: "./output/retinanet_baselines/debug_debug_debug"

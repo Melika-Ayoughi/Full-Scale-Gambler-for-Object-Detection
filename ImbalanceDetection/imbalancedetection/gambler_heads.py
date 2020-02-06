@@ -10,7 +10,6 @@ logger = logging.getLogger(__name__)
 class GamblerHeads(torch.nn.Module):
     def __init__(self):
         super().__init__()
-        print("I'm in GamblerHeads")
 
 
 @GAMBLER_HEAD_REGISTRY.register()
@@ -20,7 +19,6 @@ class SimpleGambler(GamblerHeads):
         in_channel = 100 # todo read from configs cfg.
         out_channel = 100 # todo read from configs
         super().__init__()
-        print("I'm in SimpleGambler")
         self.layers = nn.Sequential(
             nn.Conv2d(in_channel, in_channel, kernel_size=3, stride=1, padding=1),
             nn.LeakyReLU(0.2),
@@ -38,15 +36,17 @@ class SimpleGambler(GamblerHeads):
 @GAMBLER_HEAD_REGISTRY.register()
 class UnetGambler(UNet):
     def __init__(self, cfg, in_channels, out_channels, bilinear=True): # todo read from cfg
+        in_channels = 83 # 80 + 3
+        out_channels = 80
+        '''
         if cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "C":
             out_channels = cfg.MODEL.ROI_HEADS.NUM_CLASSES
         elif cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "R":
             out_channels = 200 # todo: fix number of proposals
         elif cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "CR":
             out_channels = 200 * cfg.MODEL.ROI_HEADS.NUM_CLASSES # todo
-
+        '''
         super().__init__(in_channels, out_channels, bilinear)
-        print("I'm in UnetGambler")
 
     def forward(self, input):
         return super().forward(input)
