@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from detectron2.engine import TrainerBase, default_setup, launch, default_argument_parser
 from detectron2.config import get_cfg
 from detectron2.utils.logger import setup_logger
@@ -24,6 +22,7 @@ from fvcore.nn.precise_bn import get_bn_modules
 import numpy as np
 from detectron2.evaluation import verify_results
 from detectron2.layers import cat
+import torch.nn.functional as F
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +37,7 @@ class GANTrainer(TrainerBase):
         super().__init__()
 
         # the .train() function sets the train_mode on
-        self.gambler_model = build_gambler(cfg).train()
+        self.gambler_model = build_gambler(cfg, 83, 80).train() #todo
         self.detection_model = build_detector(cfg).train()
 
         self.gambler_optimizer = self.build_optimizer_gambler(cfg, self.gambler_model)
@@ -293,6 +292,8 @@ class GANTrainer(TrainerBase):
             # A forward pass of the whole model
 
             input_images, generated_output, proposals, losses = self.detection_model(data)
+
+            input_images = F.max_pool2d(input_images, kernel_size=1, stride=8)
             # if proposals[0].has("gt_boxes"):
             #     assert proposals[0].has("gt_classes")
             #     gt_classes = cat([p.gt_classes for p in proposals], dim=0)
@@ -342,6 +343,7 @@ class GANTrainer(TrainerBase):
         # metrics_dict = loss_dict
         # metrics_dict["data_time"] = data_time
         # self._write_metrics(metrics_dict)
+
 
 def setup(args):
     cfg = get_cfg()

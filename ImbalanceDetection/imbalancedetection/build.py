@@ -28,7 +28,7 @@ def build_detector(cfg):
     return META_ARCH_REGISTRY.get(meta_arch)(cfg)
 
 
-def build_gambler(cfg):
+def build_gambler(cfg, in_channels, out_channels):
     """
     Returns the gambler model
     Build the gambler model architecture, defined by ``cfg.MODEL.GAMBLER_HEAD``.
@@ -36,4 +36,4 @@ def build_gambler(cfg):
     It can for example be a ``SimpleGambler``
     """
     gambler_arch = cfg.MODEL.GAMBLER_HEAD.NAME
-    return GAMBLER_HEAD_REGISTRY.get(gambler_arch)(cfg)
+    return GAMBLER_HEAD_REGISTRY.get(gambler_arch)(cfg, in_channels, out_channels)

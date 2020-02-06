@@ -13,13 +13,11 @@ MODEL:
     NUM_CLASSES: 80
     IN_FEATURES: ["p3"] # 1 feature map layer - p3 is stride 8 - original retinanet ["p3", "p4", "p5", "p6", "p7"]
   GAMBLER_HEAD:
-    NAME: "SimpleGambler"
+    NAME: "UnetGambler"
     GAMBLER_OUTPUT: "C"
 DATASETS:
   TRAIN: ("coco_2017_train_100samples",)
   TEST: ("coco_2017_train_100samples",)
-#TEST:
-#  DETECTIONS_PER_IMAGE: 300  # LVIS allows up to 300
 TEST:
     EVAL_PERIOD: 250
 SOLVER:
