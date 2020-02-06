@@ -203,8 +203,8 @@ class FastRCNNOutputs(object):
         gt_classes_target[fg_inds, self.gt_classes[fg_inds]] = 1
 
         loss_cls = sigmoid_focal_loss(
-            self.pred_class_logits,
-            gt_classes_target,
+            self.pred_class_logits[:, 0:bg_class_ind],
+            gt_classes_target[:, 0:bg_class_ind],
             alpha=self.focal_loss_alpha,
             gamma=self.focal_loss_gamma,
             reduction="sum",
@@ -214,59 +214,6 @@ class FastRCNNOutputs(object):
         #             "__".format(F.cross_entropy(self.pred_class_logits, self.gt_classes, reduction="mean")))
         # logger.info("classification loss divided by: {}".format(max(1, num_foreground)))
         return loss_cls
-
-    def smooth_l1_retina_loss(self):
-        """
-        Compute the smooth L1 loss for box regression based on retinanet formulation
-
-        Returns:
-            scalar Tensor
-        """
-        gt_proposal_deltas = self.box2box_transform.get_deltas(
-            self.proposals.tensor, self.gt_boxes.tensor
-        )
-        box_dim = gt_proposal_deltas.size(1)  # 4 or 5
-        cls_agnostic_bbox_reg = self.pred_proposal_deltas.size(1) == box_dim
-        device = self.pred_proposal_deltas.device
-
-        bg_class_ind = self.pred_class_logits.shape[1] - 1
-
-        # Box delta loss is only computed between the prediction for the gt class k
-        # (if 0 <= k < bg_class_ind) and the target; there is no loss defined on predictions
-        # for non-gt classes and background.
-        # Empty fg_inds produces a valid loss of zero as long as the size_average
-        # arg to smooth_l1_loss is False (otherwise it uses torch.mean internally
-        # and would produce a nan loss).
-        fg_inds = torch.nonzero((self.gt_classes >= 0) & (self.gt_classes < bg_class_ind)).squeeze(
-            1
-        )
-        if cls_agnostic_bbox_reg:
-            # pred_proposal_deltas only corresponds to foreground class for agnostic
-            gt_class_cols = torch.arange(box_dim, device=device)
-        else:
-            fg_gt_classes = self.gt_classes[fg_inds]
-            # pred_proposal_deltas for class k are located in columns [b * k : b * k + b],
-            # where b is the dimension of box representation (4 or 5)
-            # Note that compared to Detectron1,
-            # we do not perform bounding box regression for background classes.
-            gt_class_cols = box_dim * fg_gt_classes[:, None] + torch.arange(box_dim, device=device)
-
-        from fvcore.nn import smooth_l1_loss
-        num_foreground = fg_inds.nonzero().numel()
-
-        loss_box_reg = smooth_l1_loss(
-            self.pred_proposal_deltas[fg_inds[:, None], gt_class_cols],
-            gt_proposal_deltas[fg_inds],
-            self.smooth_l1_beta,
-            reduction="sum",
-        )
-
-        # todo instead of loss_box_reg = loss_box_reg / self.gt_classes.numel()
-        # logger.info("____________________original l1 regression loss would have been: {}".format(loss_box_reg / self.gt_classes.numel()))
-        # logger.info("regression loss divided by: {}".format(self.gt_classes.numel()))
-
-        loss_box_reg /= max(1, num_foreground)
-        return loss_box_reg
 
     def softmax_cross_entropy_loss(self):
         """
