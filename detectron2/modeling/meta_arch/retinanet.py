@@ -16,6 +16,7 @@ from ..box_regression import Box2BoxTransform
 from ..matcher import Matcher
 from ..postprocessing import detector_postprocess
 from .build import META_ARCH_REGISTRY
+import torch.nn.functional as F
 
 __all__ = ["RetinaNet"]
 
@@ -134,7 +135,8 @@ class RetinaNet(nn.Module):
 
         if self.training:
             gt_classes, gt_anchors_reg_deltas = self.get_ground_truth(anchors, gt_instances)
-            return images.tensor, {"pred_class_logits": box_cls, "pred_proposal_deltas": box_delta}, None,  self.losses(gt_classes, gt_anchors_reg_deltas, box_cls, box_delta)
+            return images.tensor, {"pred_class_logits": box_cls, "pred_proposal_deltas": box_delta}, None,  self.ce_losses(gt_classes, gt_anchors_reg_deltas, box_cls[0], box_delta) #todo: [0] because output of fpn is still a list
+            # before: return images.tensor, {"pred_class_logits": box_cls,"pred_proposal_deltas": box_delta}, None, self.losses(gt_classes,gt_anchors_reg_deltas,box_cls, box_delta)
         else:
             results = self.inference(box_cls, box_delta, anchors, images)
             processed_results = []
@@ -146,6 +148,47 @@ class RetinaNet(nn.Module):
                 r = detector_postprocess(results_per_image, height, width)
                 processed_results.append({"instances": r})
             return images.tensor, {"pred_class_logits": box_cls, "pred_proposal_deltas": box_delta}, None, processed_results
+
+    def softmax_cross_entropy_loss(self, gt_classes, pred_class_logits):
+        """
+        Compute the softmax cross entropy loss for box classification.
+
+        Returns:
+            scalar Tensor
+        """
+        pred_class_logits = pred_class_logits.view(8, 80, -1) #todo
+        return F.cross_entropy(pred_class_logits, gt_classes, reduction="mean")
+
+    def smooth_l1_loss(self, gt_classes, gt_anchors_deltas, pred_anchor_deltas):
+        """
+        Compute the smooth L1 loss for box regression.
+
+        Returns:
+            scalar Tensor
+        """
+        box_delta_flattened = [permute_to_N_HWA_K(x, 4) for x in pred_anchor_deltas]
+        pred_anchor_deltas = cat(box_delta_flattened, dim=1).reshape(-1, 4)
+        # shapes: (N x R, 4)
+
+        gt_classes = gt_classes.flatten()
+        gt_anchors_deltas = gt_anchors_deltas.view(-1, 4)
+        foreground_idxs = (gt_classes >= 0) & (gt_classes != self.num_classes)
+        num_foreground = foreground_idxs.sum()
+
+        loss_box_reg = smooth_l1_loss(
+            pred_anchor_deltas[foreground_idxs],
+            gt_anchors_deltas[foreground_idxs],
+            beta=self.smooth_l1_loss_beta,
+            reduction="sum",
+        ) / max(1, num_foreground)
+        return loss_box_reg
+
+    def ce_losses(self, gt_classes, gt_anchors_deltas, pred_class_logits, pred_anchor_deltas):
+        return {
+            # "loss_cls": self.softmax_cross_entropy_loss(gt_classes, pred_class_logits),
+            "loss_box_reg": self.smooth_l1_loss(gt_classes, gt_anchors_deltas, pred_anchor_deltas),
+            "loss_cls": self.softmax_cross_entropy_loss(gt_classes, pred_class_logits),
+        }
 
     def losses(self, gt_classes, gt_anchors_deltas, pred_class_logits, pred_anchor_deltas):
         """
