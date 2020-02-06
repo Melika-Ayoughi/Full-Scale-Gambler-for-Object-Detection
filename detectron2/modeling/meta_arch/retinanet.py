@@ -135,7 +135,8 @@ class RetinaNet(nn.Module):
 
         if self.training:
             gt_classes, gt_anchors_reg_deltas = self.get_ground_truth(anchors, gt_instances)
-            return images.tensor, {"pred_class_logits": box_cls, "pred_proposal_deltas": box_delta}, None,  self.ce_losses(gt_classes, gt_anchors_reg_deltas, box_cls[0], box_delta) #todo: [0] because output of fpn is still a list
+            # todo: [0] because output of fpn is still a list
+            return images.tensor, {"pred_class_logits": box_cls, "pred_proposal_deltas": box_delta}, gt_classes,  self.ce_losses(gt_classes, gt_anchors_reg_deltas, box_cls[0], box_delta)
             # before: return images.tensor, {"pred_class_logits": box_cls,"pred_proposal_deltas": box_delta}, None, self.losses(gt_classes,gt_anchors_reg_deltas,box_cls, box_delta)
         else:
             results = self.inference(box_cls, box_delta, anchors, images)
@@ -156,7 +157,7 @@ class RetinaNet(nn.Module):
         Returns:
             scalar Tensor
         """
-        pred_class_logits = pred_class_logits.view(8, 80, -1) #todo
+        pred_class_logits = pred_class_logits.reshape(8, 80, -1) #todo
         return F.cross_entropy(pred_class_logits, gt_classes, reduction="mean")
 
     def smooth_l1_loss(self, gt_classes, gt_anchors_deltas, pred_anchor_deltas):

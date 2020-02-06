@@ -291,21 +291,24 @@ class GANTrainer(TrainerBase):
 
             # A forward pass of the whole model
 
-            input_images, generated_output, proposals, losses = self.detection_model(data)
+            input_images, generated_output, gt_classes, loss_dict = self.detection_model(data)
 
             input_images = F.max_pool2d(input_images, kernel_size=1, stride=8)
-            # if proposals[0].has("gt_boxes"):
-            #     assert proposals[0].has("gt_classes")
-            #     gt_classes = cat([p.gt_classes for p in proposals], dim=0)
 
-            betting_map = self.gambler_model(generated_output)
+            # concatenate along the channel
+            gambler_input = torch.cat((input_images, generated_output['pred_class_logits'][0]), dim=1)
+
+            betting_map = self.gambler_model(gambler_input)
 
             # weighting the loss with the output of the gambler
             weighted_loss = torch.nn.CrossEntropyLoss(weight=betting_map, reduction="none") # todo: test, does this work?
-            loss_gambler = weighted_loss(fake["pred_class_logits"], gt_classes)
+            loss_gambler = weighted_loss(generated_output['pred_class_logits'][0]), gt_classes)
 
-            ce_loss = torch.nn.CrossEntropyLoss(reduction="none")
-            loss_detector = ce_loss(fake["pred_class_logits"], gt_classes) # todo: for visualization purposes
+            loss_detector = sum(loss for loss in loss_dict.values())
+            self._detect_anomaly(loss_detector, loss_dict)
+            metrics_dict = loss_dict
+            metrics_dict["data_time/gambler"] = data_time
+            self._write_metrics(metrics_dict)
 
             self.gambler_optimizer.zero_grad()
             loss_gambler.backward()
