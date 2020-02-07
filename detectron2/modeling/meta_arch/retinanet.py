@@ -137,7 +137,6 @@ class RetinaNet(nn.Module):
             gt_classes, gt_anchors_reg_deltas = self.get_ground_truth(anchors, gt_instances)
             # todo: [0] because output of fpn is still a list
             return images.tensor, {"pred_class_logits": box_cls, "pred_proposal_deltas": box_delta}, gt_classes,  self.ce_losses(gt_classes, gt_anchors_reg_deltas, box_cls[0], box_delta)
-            # before: return images.tensor, {"pred_class_logits": box_cls,"pred_proposal_deltas": box_delta}, None, self.losses(gt_classes,gt_anchors_reg_deltas,box_cls, box_delta)
         else:
             results = self.inference(box_cls, box_delta, anchors, images)
             processed_results = []
@@ -157,7 +156,7 @@ class RetinaNet(nn.Module):
         Returns:
             scalar Tensor
         """
-        pred_class_logits = pred_class_logits.reshape(8, 80, -1) #todo
+        pred_class_logits = pred_class_logits.reshape(8, 81, -1) #todo
         return F.cross_entropy(pred_class_logits, gt_classes, reduction="mean")
 
     def smooth_l1_loss(self, gt_classes, gt_anchors_deltas, pred_anchor_deltas):
@@ -436,7 +435,7 @@ class RetinaNetHead(nn.Module):
         self.cls_subnet = nn.Sequential(*cls_subnet)
         self.bbox_subnet = nn.Sequential(*bbox_subnet)
         self.cls_score = nn.Conv2d(
-            in_channels, num_anchors * num_classes, kernel_size=3, stride=1, padding=1
+            in_channels, num_anchors * (num_classes + 1), kernel_size=3, stride=1, padding=1
         )
         self.bbox_pred = nn.Conv2d(in_channels, num_anchors * 4, kernel_size=3, stride=1, padding=1)
 

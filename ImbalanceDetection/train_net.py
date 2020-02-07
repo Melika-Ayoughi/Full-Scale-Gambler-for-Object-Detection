@@ -23,6 +23,7 @@ import numpy as np
 from detectron2.evaluation import verify_results
 from detectron2.layers import cat
 import torch.nn.functional as F
+from detectron2.config import set_global_cfg
 
 logger = logging.getLogger(__name__)
 
@@ -235,11 +236,16 @@ class GANTrainer(TrainerBase):
         all_metrics_dict = comm.gather(metrics_dict)
 
         if comm.is_main_process():
-            if "data_time" in all_metrics_dict[0]:
+            if "data_time/gambler" in all_metrics_dict[0]:
                 # data_time among workers can have high variance. The actual latency
                 # caused by data_time is the maximum among workers.
-                data_time = np.max([x.pop("data_time") for x in all_metrics_dict])
-                self.storage.put_scalar("data_time", data_time)
+                data_time = np.max([x.pop("data_time/gambler") for x in all_metrics_dict])
+                self.storage.put_scalar("data_time/gambler", data_time)
+            elif "data_time/detector" in all_metrics_dict[0]:
+                # data_time among workers can have high variance. The actual latency
+                # caused by data_time is the maximum among workers.
+                data_time = np.max([x.pop("data_time/detector") for x in all_metrics_dict])
+                self.storage.put_scalar("data_time/detector", data_time)
 
             # average the rest metrics
             metrics_dict = {
@@ -302,13 +308,17 @@ class GANTrainer(TrainerBase):
 
             # weighting the loss with the output of the gambler
             # todo: test, does this work?
-            weighted_loss = torch.nn.CrossEntropyLoss(weight=betting_map, reduction="none")
-            loss_gambler = weighted_loss((generated_output['pred_class_logits'][0]), gt_classes)
+            weighted_loss = torch.nn.CrossEntropyLoss(weight=betting_map.detach(), reduction="mean")
+            pred_class_logits = generated_output['pred_class_logits'][0].reshape(8, 81, -1)
+            loss_gambler = weighted_loss(pred_class_logits, gt_classes)
 
             loss_detector = sum(loss for loss in loss_dict.values())
             self._detect_anomaly(loss_detector, loss_dict)
+            loss_dict.update({"loss_gambler": loss_gambler})
+            self._detect_anomaly(loss_gambler, loss_dict)
+
             metrics_dict = loss_dict
-            metrics_dict["data_time/gambler"] = data_time
+            metrics_dict["data_time/gambler_iter"] = data_time
             self._write_metrics(metrics_dict)
 
             self.gambler_optimizer.zero_grad()
@@ -358,6 +368,7 @@ def setup(args):
     default_setup(cfg, args)
     # Setup logger for "densepose" module
     setup_logger(output=cfg.OUTPUT_DIR, distributed_rank=comm.get_rank(), name="imbalance detection")
+    set_global_cfg(cfg)
     return cfg
 
 

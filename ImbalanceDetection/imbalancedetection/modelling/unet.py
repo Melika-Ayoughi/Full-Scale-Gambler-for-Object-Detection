@@ -32,6 +32,8 @@ class UNet(nn.Module):
         self.up4 = Up(128, 64, bilinear)
         self.outc = OutConv(64, n_classes)
 
+        self.sigmoid = torch.nn.Sigmoid()
+
     def forward(self, x):
         """
         considering N is batch_size.
@@ -52,7 +54,20 @@ class UNet(nn.Module):
         x = self.up3(x, x2)
         x = self.up4(x, x1)
         logits = self.outc(x)
-        return logits
+
+        from detectron2.config import global_cfg
+        device = torch.device(global_cfg.MODEL.DEVICE)
+
+        x = logits
+        l1 = nn.Linear(x.shape[-1], 1).to(device)
+        x = l1(x).squeeze()
+        l2 = nn.Linear(x.shape[-1], 1).to(device)
+        x = l2(x).squeeze()
+        x = x.permute(1, 0)
+        l3 = nn.Linear(x.shape[-1], 1).to(device)
+        logits = l3(x).squeeze()
+
+        return self.sigmoid(logits)
 
 
 class DoubleConv(nn.Module):
