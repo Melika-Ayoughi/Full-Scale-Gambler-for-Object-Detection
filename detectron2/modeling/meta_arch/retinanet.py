@@ -187,7 +187,6 @@ class RetinaNet(nn.Module):
         return {
             "loss_cls": self.softmax_cross_entropy_loss(gt_classes, pred_class_logits),
             "loss_box_reg": self.smooth_l1_loss(gt_classes, gt_anchors_deltas, pred_anchor_deltas),
-            # "loss_cls": self.softmax_cross_entropy_loss(gt_classes, pred_class_logits),
         }
 
     def losses(self, gt_classes, gt_anchors_deltas, pred_class_logits, pred_anchor_deltas):
@@ -314,7 +313,7 @@ class RetinaNet(nn.Module):
         assert len(anchors) == len(images)
         results = []
 
-        box_cls = [permute_to_N_HWA_K(x, self.num_classes) for x in box_cls]
+        box_cls = [permute_to_N_HWA_K(x, self.num_classes + 1) for x in box_cls]
         box_delta = [permute_to_N_HWA_K(x, 4) for x in box_delta]
         # list[Tensor], one per level, each has shape (N, Hi x Wi x A, K or 4)
 

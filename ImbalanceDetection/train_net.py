@@ -35,9 +35,6 @@ from detectron2.evaluation.lvis_evaluation import LVISEvaluator
 from collections import OrderedDict
 from detectron2.utils.events import CommonMetricPrinter, JSONWriter, TensorboardXWriter
 
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
-
 
 class GANTrainer(TrainerBase):
 
@@ -93,6 +90,13 @@ class GANTrainer(TrainerBase):
         self.start_iter = 0
         self.max_iter = cfg.SOLVER.MAX_ITER
         self.cfg = cfg
+
+        self.max_iter_gambler = self.cfg.MODEL.GAMBLER_HEAD.GAMBLER_ITERATIONS
+        self.max_iter_detector = self.cfg.MODEL.GAMBLER_HEAD.DETECTOR_ITERATIONS
+        # current training iteration of the gambler
+        self.iter_G = 0
+        # current training iteration of detector
+        self.iter_D = 0
 
         self.register_hooks(self.build_hooks(
             self.detection_model,
@@ -424,90 +428,66 @@ class GANTrainer(TrainerBase):
         return DatasetEvaluators(evaluator_list)
 
     def run_step(self):
-
-        # logger = setup_logger(output=.OUTPUT_DIR, distributed_rank=comm.get_rank(), name="imbalance detection")
-
         """
         Overwrites the run_step() function of SimpleTrainer(TrainerBase) to be compatible with GAN learning
         """
-        # assert self.model.training, "[DefaultTrainer] model was changed to eval mode!"
+        logger = setup_logger(output=global_cfg.OUTPUT_DIR, distributed_rank=comm.get_rank(), name=__name__)
+
+        assert self.gambler_model.training, "[GANTrainer] gambler model was changed to eval mode!"
+        assert self.detection_model.training, "[GANTrainer] detector model was changed to eval mode!"
+
+        # 1 forward pass
         start = time.perf_counter()
-        """
-        If your want to do something with the data, you can wrap the dataloader.
-        """
+        data = next(self._data_loader_iter)
+        data_time = time.perf_counter() - start
 
-        """
-        If your want to do something with the losses, you can wrap the model.
-        """
-        logger = setup_logger(output=global_cfg.OUTPUT_DIR, distributed_rank=comm.get_rank(), name="imbalance detection")
-        # todo make a function for the forward pass that is duplicate
-        for i in range(self.cfg.MODEL.GAMBLER_HEAD.GAMBLER_ITERATIONS):
-            if i != 0:
-                self.iter += 1
-            logger.info(f"Iteration {self.iter} of the Gambler")
+        input_images, generated_output, gt_classes, loss_dict = self.detection_model(data)
 
-            data = next(self._data_loader_iter)
-            data_time = time.perf_counter() - start
+        input_images = F.max_pool2d(input_images, kernel_size=1, stride=8)
+        # concatenate along the channel
+        gambler_input = torch.cat((input_images, generated_output['pred_class_logits'][0]), dim=1)
 
-            input_images, generated_output, gt_classes, loss_dict = self.detection_model(data)
+        betting_map = self.gambler_model(gambler_input)
 
-            input_images = F.max_pool2d(input_images, kernel_size=1, stride=8)
-            # concatenate along the channel
-            gambler_input = torch.cat((input_images, generated_output['pred_class_logits'][0]), dim=1)
+        logger.debug(f"Gambler bets: {betting_map.detach()}")
 
-            betting_map = self.gambler_model(gambler_input)
+        # weighting the loss with the output of the gambler
+        weighted_loss = torch.nn.CrossEntropyLoss(weight=betting_map.detach(), reduction="mean")
+        pred_class_logits = generated_output['pred_class_logits'][0].reshape(8, 81, -1)
+        loss_gambler = weighted_loss(pred_class_logits, gt_classes)
 
-            # weighting the loss with the output of the gambler
-            weighted_loss = torch.nn.CrossEntropyLoss(weight=betting_map.detach(), reduction="mean")
-            pred_class_logits = generated_output['pred_class_logits'][0].reshape(8, 81, -1)
-            loss_gambler = weighted_loss(pred_class_logits, gt_classes)
+        loss_detector = sum(loss for loss in loss_dict.values()) - loss_gambler
+        self._detect_anomaly(loss_detector, loss_dict)
+        loss_dict.update({"loss_gambler": loss_gambler})
+        self._detect_anomaly(loss_gambler, loss_dict)
+        metrics_dict = loss_dict
 
-            loss_detector = sum(loss for loss in loss_dict.values()) - loss_gambler
-            self._detect_anomaly(loss_detector, loss_dict)
-            loss_dict.update({"loss_gambler": loss_gambler})
-            self._detect_anomaly(loss_gambler, loss_dict)
-
-            metrics_dict = loss_dict
+        if self.iter_G < self.max_iter_gambler:
+            logger.info(f"Iteration {self.iter} in Gambler")
             metrics_dict["data_time/gambler_iter"] = data_time
-            self._write_metrics(metrics_dict)
 
             self.gambler_optimizer.zero_grad()
             loss_gambler.backward()
             self.gambler_optimizer.step()
-
-        for i in range(self.cfg.MODEL.GAMBLER_HEAD.DETECTOR_ITERATIONS):
-            if i != 0:
-                self.iter += 1
-            logger.info(f"Iteration {self.iter} of the Detector")
-
-            data = next(self._data_loader_iter)
-            data_time = time.perf_counter() - start
-
-            input_images, generated_output, gt_classes, loss_dict = self.detection_model(data)
-
-            input_images = F.max_pool2d(input_images, kernel_size=1, stride=8)
-            # concatenate along the channel
-            gambler_input = torch.cat((input_images, generated_output['pred_class_logits'][0]), dim=1)
-
-            betting_map = self.gambler_model(gambler_input)
-
-            # weighting the loss with the output of the gambler
-            weighted_loss = torch.nn.CrossEntropyLoss(weight=betting_map.detach(), reduction="mean")
-            pred_class_logits = generated_output['pred_class_logits'][0].reshape(8, 81, -1)
-            loss_gambler = weighted_loss(pred_class_logits, gt_classes)
-
-            loss_detector = sum(loss for loss in loss_dict.values()) - loss_gambler
-            self._detect_anomaly(loss_detector, loss_dict)
-            loss_dict.update({"loss_gambler": loss_gambler})
-            self._detect_anomaly(loss_gambler, loss_dict)
-
-            metrics_dict = loss_dict
+            self.iter_G += 1
+            if self.iter_G == self.max_iter_gambler:
+                logger.info("Finished training Gambler")
+        else:
+            logger.info(f"Iteration {self.iter} in Detector")
             metrics_dict["data_time/detector_iter"] = data_time
             self._write_metrics(metrics_dict)
 
             self.detection_optimizer.zero_grad()
             loss_detector.backward()
+            torch.nn.utils.clip_grad_norm_(self.detection_model.parameters(), 10)
             self.detection_optimizer.step()
+            self.iter_D += 1
+            if self.iter_D == self.max_iter_detector:
+                logger.info("Finished training Detector")
+                self.iter_G = 0
+                self.iter_D = 0
+
+        self._write_metrics(metrics_dict)
 
 
 def setup(args):

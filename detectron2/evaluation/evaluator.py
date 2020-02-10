@@ -118,7 +118,11 @@ def inference_on_dataset(model, data_loader, evaluator):
                 total_compute_time = 0
 
             start_compute_time = time.time()
-            outputs = model(inputs)
+            from detectron2.config import global_cfg
+            if global_cfg.MODEL.GAMBLER_ON is True:
+                _, _, _, outputs = model(inputs)
+            else:
+                outputs = model(inputs)
             torch.cuda.synchronize()
             total_compute_time += time.time() - start_compute_time
             evaluator.process(inputs, outputs)
