@@ -1,6 +1,6 @@
 _BASE_: "../Base-RetinaNet.yaml"
 MODEL:
-  WEIGHTS: "detectron2://ImageNetPretrained/MSRA/R-50.pkl" #todo remove
+  WEIGHTS: "detectron2://ImageNetPretrained/MSRA/R-50.pkl"
   RESNETS:
     DEPTH: 50
   ROI_HEADS:
@@ -13,8 +13,8 @@ MODEL:
     NUM_CLASSES: 80
     IN_FEATURES: ["p3"] # 1 feature map layer - p3 is stride 8 - original retinanet ["p3", "p4", "p5", "p6", "p7"]
 DATASETS:
-  TRAIN: ("coco_2017_train",)
-  TEST: ("coco_2017_val",)
+  TRAIN: ("coco_2017_train_100samples",)
+  TEST: ("coco_2017_train_100samples",)
 #TEST:
 #  DETECTIONS_PER_IMAGE: 300  # LVIS allows up to 300
 TEST:
@@ -25,4 +25,4 @@ SOLVER:
   STEPS: (3500, 4500)
   MAX_ITER: 5000
   CHECKPOINT_PERIOD: 250
-OUTPUT_DIR: "./output/simple_retinanet"
+OUTPUT_DIR: "./output/retinanet_baselines/debug_debug_debug"

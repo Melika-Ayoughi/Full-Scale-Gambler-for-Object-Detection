@@ -15,7 +15,7 @@ class GamblerHeads(torch.nn.Module):
 @GAMBLER_HEAD_REGISTRY.register()
 class SimpleGambler(GamblerHeads):
     # todo need to make sure the dimension doesn't change with this cnn, so maybe i need to use a unet or sth similar
-    def __init__(self, cfg, in_channels, out_channels):
+    def __init__(self, cfg):
         self.device = torch.device(cfg.MODEL.DEVICE)
 
         in_channel = 100 # todo read from configs cfg.
@@ -38,7 +38,7 @@ class SimpleGambler(GamblerHeads):
 
 @GAMBLER_HEAD_REGISTRY.register()
 class UnetGambler(UNet):
-    def __init__(self, cfg, in_channels, out_channels, bilinear=True): # todo read from cfg
+    def __init__(self, cfg, bilinear=True): # todo read from cfg
         self.device = torch.device(cfg.MODEL.DEVICE)
 
         in_channels = 84 # 81 + 3

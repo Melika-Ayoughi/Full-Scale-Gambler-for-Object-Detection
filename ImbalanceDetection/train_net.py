@@ -6,7 +6,7 @@ import torch
 from typing import Any, Dict, List
 import logging
 import time
-
+import os
 from imbalancedetection.build import build_detector, build_gambler
 from imbalancedetection.config import add_gambler_config
 from detectron2.data import (
@@ -20,12 +20,23 @@ from detectron2.checkpoint import DetectionCheckpointer
 from detectron2.engine import hooks
 from fvcore.nn.precise_bn import get_bn_modules
 import numpy as np
-from detectron2.evaluation import verify_results
 from detectron2.layers import cat
 import torch.nn.functional as F
-from detectron2.config import set_global_cfg
+from detectron2.config import set_global_cfg, global_cfg
+from detectron2.evaluation.coco_evaluation import COCOEvaluator
+from detectron2.evaluation.evaluator import DatasetEvaluator, DatasetEvaluators
+from detectron2.evaluation import (
+    DatasetEvaluator,
+    inference_on_dataset,
+    print_csv_format,
+    verify_results,
+)
+from detectron2.evaluation.lvis_evaluation import LVISEvaluator
+from collections import OrderedDict
+from detectron2.utils.events import CommonMetricPrinter, JSONWriter, TensorboardXWriter
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 
 
 class GANTrainer(TrainerBase):
@@ -38,7 +49,7 @@ class GANTrainer(TrainerBase):
         super().__init__()
 
         # the .train() function sets the train_mode on
-        self.gambler_model = build_gambler(cfg, 83, 80).train() #todo
+        self.gambler_model = build_gambler(cfg).train() #todo
         self.detection_model = build_detector(cfg).train()
 
         self.gambler_optimizer = self.build_optimizer_gambler(cfg, self.gambler_model)
@@ -83,7 +94,11 @@ class GANTrainer(TrainerBase):
         self.max_iter = cfg.SOLVER.MAX_ITER
         self.cfg = cfg
 
-        # self.register_hooks(self.build_hooks())
+        self.register_hooks(self.build_hooks(
+            self.detection_model,
+            self.detection_optimizer,
+            self.detection_scheduler,
+            self.detection_checkpointer))
 
     @classmethod
     def build_optimizer_gambler(self, cfg, gambler_model) -> torch.optim.Optimizer:
@@ -113,8 +128,8 @@ class GANTrainer(TrainerBase):
 
         gambler_optimizer = torch.optim.SGD(params, lr, momentum=cfg.MODEL.GAMBLER_HEAD.MOMENTUM)
 
-        logger = logging.getLogger(__name__)
-        logger.info("Gambler Optimizer:\n{}".format(gambler_optimizer))
+        # logger = setup_logger(output=cfg.OUTPUT_DIR, distributed_rank=comm.get_rank(), name="imbalance detection")
+        # logger.info("Gambler Optimizer:\n{}".format(gambler_optimizer))
         return gambler_optimizer
 
     @classmethod
@@ -144,7 +159,8 @@ class GANTrainer(TrainerBase):
             params += [{"params": [value], "lr": lr, "weight_decay": weight_decay}]
 
         detector_optimizer = torch.optim.SGD(params, lr, momentum=cfg.SOLVER.MOMENTUM)
-        logger.info("Detector Optimizer:\n{}".format(detector_optimizer))
+        # logger = setup_logger(output=cfg.OUTPUT_DIR, distributed_rank=comm.get_rank(), name="imbalance detection")
+        # logger.info("Detector Optimizer:\n{}".format(detector_optimizer))
         return detector_optimizer
 
     @classmethod
@@ -166,52 +182,52 @@ class GANTrainer(TrainerBase):
         """
         return build_lr_scheduler(cfg, optimizer)
 
-    # def build_hooks(self, model, optimizer, scheduler, checkpointer):
-    #     """
-    #     Build a list of default hooks, including timing, evaluation,
-    #     checkpointing, lr scheduling, precise BN, writing events.
-    #
-    #     Returns:
-    #         list[HookBase]:
-    #     """
-    #     cfg = self.cfg.clone()
-    #     cfg.defrost()
-    #     cfg.DATALOADER.NUM_WORKERS = 0  # save some memory and time for PreciseBN
-    #
-    #     ret = [
-    #         hooks.IterationTimer(),
-    #         hooks.LRScheduler(optimizer, scheduler),
-    #         hooks.PreciseBN(
-    #             # Run at the same freq as (but before) evaluation.
-    #             cfg.TEST.EVAL_PERIOD,
-    #             self.model,
-    #             # Build a new data loader to not affect training
-    #             self.build_train_loader(cfg),
-    #             cfg.TEST.PRECISE_BN.NUM_ITER,
-    #         )
-    #         if cfg.TEST.PRECISE_BN.ENABLED and get_bn_modules(model)
-    #         else None,
-    #     ]
-    #
-    #     # Do PreciseBN before checkpointer, because it updates the model and need to
-    #     # be saved by checkpointer.
-    #     # This is not always the best: if checkpointing has a different frequency,
-    #     # some checkpoints may have more precise statistics than others.
-    #     if comm.is_main_process():
-    #         ret.append(hooks.PeriodicCheckpointer(checkpointer, cfg.SOLVER.CHECKPOINT_PERIOD))
-    #
-    #     def test_and_save_results():
-    #         self._last_eval_results = self.test(self.cfg, self.model)
-    #         return self._last_eval_results
-    #
-    #     # Do evaluation after checkpointer, because then if it fails,
-    #     # we can use the saved checkpoint to debug.
-    #     ret.append(hooks.EvalHook(cfg.TEST.EVAL_PERIOD, test_and_save_results))
-    #
-    #     if comm.is_main_process():
-    #         # run writers in the end, so that evaluation metrics are written
-    #         ret.append(hooks.PeriodicWriter(self.build_writers()))
-    #     return ret
+    def build_hooks(self, model, optimizer, scheduler, checkpointer):
+        """
+        Build a list of default hooks, including timing, evaluation,
+        checkpointing, lr scheduling, precise BN, writing events.
+
+        Returns:
+            list[HookBase]:
+        """
+        cfg = self.cfg.clone()
+        cfg.defrost()
+        cfg.DATALOADER.NUM_WORKERS = 0  # save some memory and time for PreciseBN
+
+        ret = [
+            hooks.IterationTimer(),
+            hooks.LRScheduler(optimizer, scheduler),
+            hooks.PreciseBN(
+                # Run at the same freq as (but before) evaluation.
+                cfg.TEST.EVAL_PERIOD,
+                model,
+                # Build a new data loader to not affect training
+                self.build_train_loader(cfg),
+                cfg.TEST.PRECISE_BN.NUM_ITER,
+            )
+            if cfg.TEST.PRECISE_BN.ENABLED and get_bn_modules(model)
+            else None,
+        ]
+
+        # Do PreciseBN before checkpointer, because it updates the model and need to
+        # be saved by checkpointer.
+        # This is not always the best: if checkpointing has a different frequency,
+        # some checkpoints may have more precise statistics than others.
+        if comm.is_main_process():
+            ret.append(hooks.PeriodicCheckpointer(checkpointer, cfg.SOLVER.CHECKPOINT_PERIOD))
+
+        def test_and_save_results():
+            self._last_eval_results = self.test(self.cfg, model)
+            return self._last_eval_results
+
+        # Do evaluation after checkpointer, because then if it fails,
+        # we can use the saved checkpoint to debug.
+        ret.append(hooks.EvalHook(cfg.TEST.EVAL_PERIOD, test_and_save_results))
+
+        if comm.is_main_process():
+            # run writers in the end, so that evaluation metrics are written
+            ret.append(hooks.PeriodicWriter(self.build_writers()))
+        return ret
 
     def _detect_anomaly(self, losses, loss_dict):
         if not torch.isfinite(losses).all():
@@ -269,11 +285,147 @@ class GANTrainer(TrainerBase):
             verify_results(self.cfg, self._last_eval_results)
             return self._last_eval_results
 
-    def test(self):
-        # can check DefaultTrainer
-        raise NotImplementedError
+    @classmethod
+    def build_test_loader(cls, cfg, dataset_name):
+        """
+        Returns:
+            iterable
+
+        It now calls :func:`detectron2.data.build_detection_test_loader`.
+        Overwrite it if you'd like a different data loader.
+        """
+        return build_detection_test_loader(cfg, dataset_name)
+
+    def build_writers(self):
+        """
+        Build a list of writers to be used. By default it contains
+        writers that write metrics to the screen,
+        a json file, and a tensorboard event file respectively.
+        If you'd like a different list of writers, you can overwrite it in
+        your trainer.
+
+        Returns:
+            list[EventWriter]: a list of :class:`EventWriter` objects.
+
+        It is now implemented by:
+
+        .. code-block:: python
+
+            return [
+                CommonMetricPrinter(self.max_iter),
+                JSONWriter(os.path.join(self.cfg.OUTPUT_DIR, "metrics.json")),
+                TensorboardXWriter(self.cfg.OUTPUT_DIR),
+            ]
+
+        """
+        # Assume the default print/log frequency.
+        return [
+            # It may not always print what you want to see, since it prints "common" metrics only.
+            CommonMetricPrinter(self.max_iter),
+            JSONWriter(os.path.join(self.cfg.OUTPUT_DIR, "metrics.json")),
+            TensorboardXWriter(self.cfg.OUTPUT_DIR),
+        ]
+
+    def test(self, cfg, model, evaluators=None):
+        """
+        Args:
+            cfg (CfgNode):
+            model (nn.Module):
+            evaluators (list[DatasetEvaluator] or None): if None, will call
+                :meth:`build_evaluator`. Otherwise, must have the same length as
+                `cfg.DATASETS.TEST`.
+
+        Returns:
+            dict: a dict of result metrics
+        """
+        logger = setup_logger(output=cfg.OUTPUT_DIR, distributed_rank=comm.get_rank(), name="imbalance detection")
+        if isinstance(evaluators, DatasetEvaluator):
+            evaluators = [evaluators]
+        if evaluators is not None:
+            assert len(cfg.DATASETS.TEST) == len(evaluators), "{} != {}".format(
+                len(cfg.DATASETS.TEST), len(evaluators)
+            )
+
+        results = OrderedDict()
+        for idx, dataset_name in enumerate(cfg.DATASETS.TEST):
+            data_loader = self.build_test_loader(cfg, dataset_name)
+            # When evaluators are passed in as arguments,
+            # implicitly assume that evaluators can be created before data_loader.
+            if evaluators is not None:
+                evaluator = evaluators[idx]
+            else:
+                try:
+                    evaluator = self.build_evaluator(cfg, dataset_name)
+                except NotImplementedError:
+                    logger.warning(
+                        "No evaluator found. Use `DefaultTrainer.test(evaluators=)`, "
+                        "or implement its `build_evaluator` method."
+                    )
+                    results[dataset_name] = {}
+                    continue
+            results_i = inference_on_dataset(model, data_loader, evaluator)
+            results[dataset_name] = results_i
+            if comm.is_main_process():
+                assert isinstance(
+                    results_i, dict
+                ), "Evaluator must return a dict on the main process. Got {} instead.".format(
+                    results_i
+                )
+                logger.info("Evaluation results for {} in csv format:".format(dataset_name))
+                print_csv_format(results_i)
+
+        if len(results) == 1:
+            results = list(results.values())[0]
+        return results
+
+    @classmethod
+    def build_evaluator(cls, cfg, dataset_name, output_folder=None):
+        """
+        Create evaluator(s) for a given dataset.
+        This uses the special metadata "evaluator_type" associated with each builtin dataset.
+        For your own dataset, you can simply create an evaluator manually in your
+        script and do not have to worry about the hacky if-else logic here.
+        """
+        if output_folder is None:
+            output_folder = os.path.join(cfg.OUTPUT_DIR, "inference")
+        evaluator_list = []
+        evaluator_type = MetadataCatalog.get(dataset_name).evaluator_type
+        # if evaluator_type in ["sem_seg", "coco_panoptic_seg"]:
+        #     evaluator_list.append(
+        #         SemSegEvaluator(
+        #             dataset_name,
+        #             distributed=True,
+        #             num_classes=cfg.MODEL.SEM_SEG_HEAD.NUM_CLASSES,
+        #             ignore_label=cfg.MODEL.SEM_SEG_HEAD.IGNORE_VALUE,
+        #             output_dir=output_folder,
+        #         )
+        #     )
+        if evaluator_type in ["coco", "coco_panoptic_seg"]:
+            evaluator_list.append(COCOEvaluator(dataset_name, cfg, True, output_folder))
+        # if evaluator_type == "coco_panoptic_seg":
+        #     evaluator_list.append(COCOPanopticEvaluator(dataset_name, output_folder))
+        # elif evaluator_type == "cityscapes":
+        #     assert (
+        #             torch.cuda.device_count() >= comm.get_rank()
+        #     ), "CityscapesEvaluator currently do not work with multiple machines."
+        #     return CityscapesEvaluator(dataset_name)
+        # elif evaluator_type == "pascal_voc":
+        #     return PascalVOCDetectionEvaluator(dataset_name)
+        elif evaluator_type == "lvis":
+            return LVISEvaluator(dataset_name, cfg, True, output_folder)
+        if len(evaluator_list) == 0:
+            raise NotImplementedError(
+                "no Evaluator for the dataset {} with the type {}".format(
+                    dataset_name, evaluator_type
+                )
+            )
+        elif len(evaluator_list) == 1:
+            return evaluator_list[0]
+        return DatasetEvaluators(evaluator_list)
 
     def run_step(self):
+
+        # logger = setup_logger(output=.OUTPUT_DIR, distributed_rank=comm.get_rank(), name="imbalance detection")
 
         """
         Overwrites the run_step() function of SimpleTrainer(TrainerBase) to be compatible with GAN learning
@@ -287,32 +439,30 @@ class GANTrainer(TrainerBase):
         """
         If your want to do something with the losses, you can wrap the model.
         """
+        logger = setup_logger(output=global_cfg.OUTPUT_DIR, distributed_rank=comm.get_rank(), name="imbalance detection")
         # todo make a function for the forward pass that is duplicate
-        # todo losses need to be dictionaries
-
-        for _ in range(self.cfg.MODEL.GAMBLER_HEAD.GAMBLER_ITERATIONS):
+        for i in range(self.cfg.MODEL.GAMBLER_HEAD.GAMBLER_ITERATIONS):
+            if i != 0:
+                self.iter += 1
+            logger.info(f"Iteration {self.iter} of the Gambler")
 
             data = next(self._data_loader_iter)
             data_time = time.perf_counter() - start
 
-            # A forward pass of the whole model
-
             input_images, generated_output, gt_classes, loss_dict = self.detection_model(data)
 
             input_images = F.max_pool2d(input_images, kernel_size=1, stride=8)
-
             # concatenate along the channel
             gambler_input = torch.cat((input_images, generated_output['pred_class_logits'][0]), dim=1)
 
             betting_map = self.gambler_model(gambler_input)
 
             # weighting the loss with the output of the gambler
-            # todo: test, does this work?
             weighted_loss = torch.nn.CrossEntropyLoss(weight=betting_map.detach(), reduction="mean")
             pred_class_logits = generated_output['pred_class_logits'][0].reshape(8, 81, -1)
             loss_gambler = weighted_loss(pred_class_logits, gt_classes)
 
-            loss_detector = sum(loss for loss in loss_dict.values())
+            loss_detector = sum(loss for loss in loss_dict.values()) - loss_gambler
             self._detect_anomaly(loss_detector, loss_dict)
             loss_dict.update({"loss_gambler": loss_gambler})
             self._detect_anomaly(loss_gambler, loss_dict)
@@ -325,38 +475,39 @@ class GANTrainer(TrainerBase):
             loss_gambler.backward()
             self.gambler_optimizer.step()
 
-        for _ in self.cfg.MODEL.GAMBLER_HEAD.DETECTOR_ITERATIONS:
+        for i in range(self.cfg.MODEL.GAMBLER_HEAD.DETECTOR_ITERATIONS):
+            if i != 0:
+                self.iter += 1
+            logger.info(f"Iteration {self.iter} of the Detector")
 
             data = next(self._data_loader_iter)
             data_time = time.perf_counter() - start
-            # A forward pass of the whole model (maybe I need to change the structure)
-            fake, proposals, losses = self.detection_model(data)
 
-            if proposals[0].has("gt_boxes"):
-                assert proposals[0].has("gt_classes")
-                gt_classes = cat([p.gt_classes for p in proposals], dim=0)
+            input_images, generated_output, gt_classes, loss_dict = self.detection_model(data)
 
-            betting_map = self.gambler_model(fake)
+            input_images = F.max_pool2d(input_images, kernel_size=1, stride=8)
+            # concatenate along the channel
+            gambler_input = torch.cat((input_images, generated_output['pred_class_logits'][0]), dim=1)
+
+            betting_map = self.gambler_model(gambler_input)
+
             # weighting the loss with the output of the gambler
-            weighted_loss = torch.nn.CrossEntropyLoss(weight=betting_map,
-                                                      reduction="none")  # todo: test, does this work?
-            loss_gambler = weighted_loss(fake["pred_class_logits"], gt_classes)
+            weighted_loss = torch.nn.CrossEntropyLoss(weight=betting_map.detach(), reduction="mean")
+            pred_class_logits = generated_output['pred_class_logits'][0].reshape(8, 81, -1)
+            loss_gambler = weighted_loss(pred_class_logits, gt_classes)
 
-            ce_loss = torch.nn.CrossEntropyLoss(reduction="none")
-            loss_detector = ce_loss(fake["pred_class_logits"], gt_classes) - loss_gambler # for visualization purposes
+            loss_detector = sum(loss for loss in loss_dict.values()) - loss_gambler
+            self._detect_anomaly(loss_detector, loss_dict)
+            loss_dict.update({"loss_gambler": loss_gambler})
+            self._detect_anomaly(loss_gambler, loss_dict)
+
+            metrics_dict = loss_dict
+            metrics_dict["data_time/detector_iter"] = data_time
+            self._write_metrics(metrics_dict)
 
             self.detection_optimizer.zero_grad()
             loss_detector.backward()
             self.detection_optimizer.step()
-
-        # todo write and keep the losses, detect anomaly
-        # loss_dict = self.model(data)
-        # losses = sum(loss for loss in loss_dict.values())
-        # self._detect_anomaly(losses, loss_dict)
-        #
-        # metrics_dict = loss_dict
-        # metrics_dict["data_time"] = data_time
-        # self._write_metrics(metrics_dict)
 
 
 def setup(args):
