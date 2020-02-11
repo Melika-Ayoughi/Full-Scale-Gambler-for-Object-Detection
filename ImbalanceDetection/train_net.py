@@ -46,7 +46,7 @@ class GANTrainer(TrainerBase):
         super().__init__()
 
         # the .train() function sets the train_mode on
-        self.gambler_model = build_gambler(cfg).train() #todo
+        self.gambler_model = build_gambler(cfg).train()
         self.detection_model = build_detector(cfg).train()
 
         self.gambler_optimizer = self.build_optimizer_gambler(cfg, self.gambler_model)
@@ -72,6 +72,7 @@ class GANTrainer(TrainerBase):
         # Assume no other objects need to be checkpointed.
         # We can later make it checkpoint the stateful hooks
         # todo check that checkpoints of gambler and detector are not overwritten by eachother
+
         self.detection_checkpointer = DetectionCheckpointer(
             # Assume you want to save checkpoints together with logs/statistics
             self.detection_model,
@@ -79,13 +80,18 @@ class GANTrainer(TrainerBase):
             optimizer=self.detection_optimizer,
             scheduler=self.detection_scheduler,
         )
-        # self.gambler_checkpointer = DetectionCheckpointer(
-        #     # Assume you want to save checkpoints together with logs/statistics
-        #     self.gambler_model,
-        #     cfg.OUTPUT_DIR,
-        #     optimizer=self.gambler_optimizer,
-        #     scheduler=self.gambler_scheduler,
-        # )
+
+        gambler_model_loc = os.path.join(cfg.OUTPUT_DIR, "gambler_models")
+        print(gambler_model_loc)
+        if not os.path.exists(gambler_model_loc):
+            os.mkdir(gambler_model_loc)
+        self.gambler_checkpointer = DetectionCheckpointer(
+            # Assume you want to save checkpoints together with logs/statistics
+            self.gambler_model,
+            gambler_model_loc,
+            optimizer=self.gambler_optimizer,
+            scheduler=self.gambler_scheduler,
+        )
 
         self.start_iter = 0
         self.max_iter = cfg.SOLVER.MAX_ITER
@@ -98,11 +104,21 @@ class GANTrainer(TrainerBase):
         # current training iteration of detector
         self.iter_D = 0
 
-        self.register_hooks(self.build_hooks(
+        det_hooks = self.build_hooks(
             self.detection_model,
             self.detection_optimizer,
             self.detection_scheduler,
-            self.detection_checkpointer))
+            self.detection_checkpointer,
+        )
+        self.register_hooks(det_hooks)
+        gamb_hooks = self.build_hooks( #todo: does calling register twice work?
+            self.gambler_model,
+            self.gambler_optimizer,
+            self.gambler_scheduler,
+            self.gambler_checkpointer
+        )
+
+        self.register_hooks(gamb_hooks)
 
     @classmethod
     def build_optimizer_gambler(self, cfg, gambler_model) -> torch.optim.Optimizer:
@@ -447,33 +463,67 @@ class GANTrainer(TrainerBase):
         # concatenate along the channel
         gambler_input = torch.cat((input_images, generated_output['pred_class_logits'][0]), dim=1)
 
-        betting_map = self.gambler_model(gambler_input)
-
-        logger.debug(f"Gambler bets: {betting_map.detach()}")
-
-        # weighting the loss with the output of the gambler
-        weighted_loss = torch.nn.CrossEntropyLoss(weight=betting_map.detach(), reduction="mean")
-        pred_class_logits = generated_output['pred_class_logits'][0].reshape(8, 81, -1)
-        loss_gambler = weighted_loss(pred_class_logits, gt_classes)
-
-        loss_detector = sum(loss for loss in loss_dict.values()) - loss_gambler
-        self._detect_anomaly(loss_detector, loss_dict)
-        loss_dict.update({"loss_gambler": loss_gambler})
-        self._detect_anomaly(loss_gambler, loss_dict)
-        metrics_dict = loss_dict
-
         if self.iter_G < self.max_iter_gambler:
             logger.info(f"Iteration {self.iter} in Gambler")
+
+            # self.detection_model.eval()
+            # self.gambler_model.train()
+
+            betting_map = self.gambler_model(gambler_input.detach())
+            logger.debug(f"Gambler bets: max:{torch.max(betting_map)} min:{torch.min(betting_map)} mean: :{torch.mean(betting_map)}")
+
+            # weighting the loss with the output of the gambler
+            loss_func = torch.nn.CrossEntropyLoss(reduction="none")
+            pred_class_logits = generated_output['pred_class_logits'][0].reshape(8, 81, -1).detach()
+            # Find places with highest CE
+            betting_map = betting_map.squeeze().reshape(betting_map.shape[0], -1)
+
+            # Regularize the betting map
+            betting_map = betting_map / (torch.sum(betting_map, dim=1)).reshape(betting_map.shape[0], 1).expand(betting_map.shape)
+            loss_gambler = -torch.mean(loss_func(pred_class_logits, gt_classes) * betting_map.reshape(betting_map.shape[0], -1))
+
+            loss_detector = sum(loss for loss in loss_dict.values()) - loss_gambler
+            self._detect_anomaly(loss_detector, loss_dict)
+            loss_dict.update({"loss_gambler": loss_gambler})
+            self._detect_anomaly(loss_gambler, loss_dict)
+            metrics_dict = loss_dict
             metrics_dict["data_time/gambler_iter"] = data_time
 
             self.gambler_optimizer.zero_grad()
             loss_gambler.backward()
+            # print(list(self.gambler_model.parameters())[0].grad)
             self.gambler_optimizer.step()
+
             self.iter_G += 1
             if self.iter_G == self.max_iter_gambler:
                 logger.info("Finished training Gambler")
+
+            # self.detection_model.train()
         else:
             logger.info(f"Iteration {self.iter} in Detector")
+
+            # self.detection_model.train()
+            # self.gambler_model.eval()
+
+            betting_map = self.gambler_model(gambler_input)
+            # logger.debug(f"Gambler bets: {betting_map}")
+            logger.debug(f"Gambler bets: max:{torch.max(betting_map)} min:{torch.min(betting_map)} mean: :{torch.mean(betting_map)}")
+
+            # weighting the loss with the output of the gambler
+            loss_func = torch.nn.CrossEntropyLoss(reduction="none")
+            pred_class_logits = generated_output['pred_class_logits'][0].reshape(8, 81, -1)
+            # Find places with highest CE
+            betting_map = betting_map.squeeze().reshape(betting_map.shape[0], -1)
+
+            # Regularize the betting map
+            betting_map = betting_map / (torch.sum(betting_map, dim=1)).reshape(betting_map.shape[0], 1).expand(betting_map.shape)
+            loss_gambler = -torch.mean(loss_func(pred_class_logits, gt_classes) * betting_map.reshape(betting_map.shape[0], -1))
+
+            loss_detector = sum(loss for loss in loss_dict.values()) - loss_gambler
+            self._detect_anomaly(loss_detector, loss_dict)
+            loss_dict.update({"loss_gambler": loss_gambler})
+            self._detect_anomaly(loss_gambler, loss_dict)
+            metrics_dict = loss_dict
             metrics_dict["data_time/detector_iter"] = data_time
             self._write_metrics(metrics_dict)
 
@@ -486,6 +536,8 @@ class GANTrainer(TrainerBase):
                 logger.info("Finished training Detector")
                 self.iter_G = 0
                 self.iter_D = 0
+
+            # self.gambler_model.train()
 
         self._write_metrics(metrics_dict)
 

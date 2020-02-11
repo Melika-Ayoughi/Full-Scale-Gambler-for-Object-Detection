@@ -55,17 +55,17 @@ class UNet(nn.Module):
         x = self.up4(x, x1)
         logits = self.outc(x)
 
-        from detectron2.config import global_cfg
-        device = torch.device(global_cfg.MODEL.DEVICE)
-
-        x = logits
-        l1 = nn.Linear(x.shape[-1], 1).to(device)
-        x = l1(x).squeeze()
-        l2 = nn.Linear(x.shape[-1], 1).to(device)
-        x = l2(x).squeeze()
-        x = x.permute(1, 0)
-        l3 = nn.Linear(x.shape[-1], 1).to(device)
-        logits = l3(x).squeeze()
+        # from detectron2.config import global_cfg
+        # device = torch.device(global_cfg.MODEL.DEVICE)
+        #
+        # x = logits
+        # l1 = nn.Linear(x.shape[-1], 1).to(device)
+        # x = l1(x).squeeze()
+        # l2 = nn.Linear(x.shape[-1], 1).to(device)
+        # x = l2(x).squeeze()
+        # x = x.permute(1, 0)
+        # l3 = nn.Linear(x.shape[-1], 1).to(device)
+        # logits = l3(x).squeeze()
 
         return self.sigmoid(logits)
 

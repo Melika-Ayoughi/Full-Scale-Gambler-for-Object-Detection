@@ -129,7 +129,8 @@ class TrainerBase:
                 self.before_train()
                 for self.iter in range(start_iter, max_iter):
                     self.before_step()
-                    self.run_step()
+                    with torch.autograd.detect_anomaly():
+                        self.run_step()
                     self.after_step()
             finally:
                 self.after_train()
