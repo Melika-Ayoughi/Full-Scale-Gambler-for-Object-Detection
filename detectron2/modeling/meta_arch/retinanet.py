@@ -156,7 +156,9 @@ class RetinaNet(nn.Module):
         Returns:
             scalar Tensor
         """
-        pred_class_logits = pred_class_logits.reshape(8, 81, -1) #todo
+
+        pred_class_logits = pred_class_logits.reshape(pred_class_logits.shape[0], pred_class_logits.shape[1], -1)
+        # print(pred_class_logits.shape, gt_classes.shape)
         return F.cross_entropy(pred_class_logits, gt_classes, reduction="mean")
 
     def smooth_l1_loss(self, gt_classes, gt_anchors_deltas, pred_anchor_deltas):

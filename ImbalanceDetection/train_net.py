@@ -60,7 +60,7 @@ class GANTrainer(TrainerBase):
                 self.gambler_model, device_ids=[comm.get_local_rank()], broadcast_buffers=False
             )
             self.detection_model = DistributedDataParallel(
-                self.detection_model, device_ids=[comm.get_local_rank()], broadcast_buffers=False
+                self.detection_model, device_ids=[comm.get_local_rank()], broadcast_buffers=False, find_unused_parameters=True,
             )
 
         self.data_loader = data_loader
@@ -111,7 +111,7 @@ class GANTrainer(TrainerBase):
             self.detection_checkpointer,
         )
         self.register_hooks(det_hooks)
-        gamb_hooks = self.build_hooks( #todo: does calling register twice work?
+        gamb_hooks = self.build_hooks(
             self.gambler_model,
             self.gambler_optimizer,
             self.gambler_scheduler,
@@ -242,7 +242,12 @@ class GANTrainer(TrainerBase):
 
         # Do evaluation after checkpointer, because then if it fails,
         # we can use the saved checkpoint to debug.
-        ret.append(hooks.EvalHook(cfg.TEST.EVAL_PERIOD, test_and_save_results))
+        from imbalancedetection.modelling.unet import UNet
+        from imbalancedetection.gambler_heads import GamblerHeads
+
+        # Perform evaluation only if the model is a meta architecture
+        if not (isinstance(model, UNet) or isinstance(model, GamblerHeads)):
+            ret.append(hooks.EvalHook(cfg.TEST.EVAL_PERIOD, test_and_save_results))
 
         if comm.is_main_process():
             # run writers in the end, so that evaluation metrics are written
@@ -472,14 +477,21 @@ class GANTrainer(TrainerBase):
             betting_map = self.gambler_model(gambler_input.detach())
             logger.debug(f"Gambler bets: max:{torch.max(betting_map)} min:{torch.min(betting_map)} mean: :{torch.mean(betting_map)}")
 
+            import torchvision.transforms as transforms
+            pilTrans = transforms.ToPILImage()
+            Img = betting_map[0,:,:,:].squeeze().to('cpu')
+            pilImg = pilTrans(Img)
+            pilImg.save(f"{self.iter_G}_test.jpg")
+
             # weighting the loss with the output of the gambler
             loss_func = torch.nn.CrossEntropyLoss(reduction="none")
-            pred_class_logits = generated_output['pred_class_logits'][0].reshape(8, 81, -1).detach()
+            [B,C,_,_] = generated_output['pred_class_logits'][0].shape
+            pred_class_logits = generated_output['pred_class_logits'][0].reshape(B, C, -1).detach()
             # Find places with highest CE
             betting_map = betting_map.squeeze().reshape(betting_map.shape[0], -1)
 
             # Regularize the betting map
-            betting_map = betting_map / (torch.sum(betting_map, dim=1)).reshape(betting_map.shape[0], 1).expand(betting_map.shape)
+            # betting_map = betting_map / (torch.sum(betting_map, dim=1)).reshape(betting_map.shape[0], 1).expand(betting_map.shape)
             loss_gambler = -torch.mean(loss_func(pred_class_logits, gt_classes) * betting_map.reshape(betting_map.shape[0], -1))
 
             loss_detector = sum(loss for loss in loss_dict.values()) - loss_gambler
@@ -511,12 +523,13 @@ class GANTrainer(TrainerBase):
 
             # weighting the loss with the output of the gambler
             loss_func = torch.nn.CrossEntropyLoss(reduction="none")
-            pred_class_logits = generated_output['pred_class_logits'][0].reshape(8, 81, -1)
+            [B, C, _, _] = generated_output['pred_class_logits'][0].shape
+            pred_class_logits = generated_output['pred_class_logits'][0].reshape(B, C, -1)
             # Find places with highest CE
             betting_map = betting_map.squeeze().reshape(betting_map.shape[0], -1)
 
             # Regularize the betting map
-            betting_map = betting_map / (torch.sum(betting_map, dim=1)).reshape(betting_map.shape[0], 1).expand(betting_map.shape)
+            # betting_map = betting_map / (torch.sum(betting_map, dim=1)).reshape(betting_map.shape[0], 1).expand(betting_map.shape)
             loss_gambler = -torch.mean(loss_func(pred_class_logits, gt_classes) * betting_map.reshape(betting_map.shape[0], -1))
 
             loss_detector = sum(loss for loss in loss_dict.values()) - loss_gambler
