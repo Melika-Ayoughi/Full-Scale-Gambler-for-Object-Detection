@@ -35,7 +35,6 @@ from detectron2.evaluation.lvis_evaluation import LVISEvaluator
 from collections import OrderedDict
 from detectron2.utils.events import CommonMetricPrinter, JSONWriter, TensorboardXWriter
 
-
 class GANTrainer(TrainerBase):
 
     def __init__(self, cfg):
@@ -83,8 +82,9 @@ class GANTrainer(TrainerBase):
 
         gambler_model_loc = os.path.join(cfg.OUTPUT_DIR, "gambler_models")
         print(gambler_model_loc)
-        if not os.path.exists(gambler_model_loc):
-            os.mkdir(gambler_model_loc)
+        os.makedirs(gambler_model_loc, exist_ok=True)
+        # if not os.path.exists(gambler_model_loc):
+        #     os.mkdir(gambler_model_loc)
         self.gambler_checkpointer = DetectionCheckpointer(
             # Assume you want to save checkpoints together with logs/statistics
             self.gambler_model,
@@ -119,6 +119,9 @@ class GANTrainer(TrainerBase):
         )
 
         self.register_hooks(gamb_hooks)
+
+        # self.writer = SummaryWriter(self.cfg.OUTPUT_DIR)
+
 
     @classmethod
     def build_optimizer_gambler(self, cfg, gambler_model) -> torch.optim.Optimizer:
@@ -246,8 +249,12 @@ class GANTrainer(TrainerBase):
         from imbalancedetection.gambler_heads import GamblerHeads
 
         # Perform evaluation only if the model is a meta architecture
-        if not (isinstance(model, UNet) or isinstance(model, GamblerHeads)):
-            ret.append(hooks.EvalHook(cfg.TEST.EVAL_PERIOD, test_and_save_results))
+        if comm.get_world_size() > 1:
+            if not (isinstance(model.module, UNet) or isinstance(model.module, GamblerHeads)):
+                ret.append(hooks.EvalHook(cfg.TEST.EVAL_PERIOD, test_and_save_results))
+        elif comm.get_world_size() == 1:
+            if not (isinstance(model, UNet) or isinstance(model, GamblerHeads)):
+                ret.append(hooks.EvalHook(cfg.TEST.EVAL_PERIOD, test_and_save_results))
 
         if comm.is_main_process():
             # run writers in the end, so that evaluation metrics are written
@@ -464,7 +471,7 @@ class GANTrainer(TrainerBase):
 
         input_images, generated_output, gt_classes, loss_dict = self.detection_model(data)
 
-        input_images = F.max_pool2d(input_images, kernel_size=1, stride=8)
+        input_images = F.max_pool2d(input_images, kernel_size=1, stride=8) # todo: stride depends on feature map layer
         # concatenate along the channel
         gambler_input = torch.cat((input_images, generated_output['pred_class_logits'][0]), dim=1)
 
@@ -477,14 +484,16 @@ class GANTrainer(TrainerBase):
             betting_map = self.gambler_model(gambler_input.detach())
             logger.debug(f"Gambler bets: max:{torch.max(betting_map)} min:{torch.min(betting_map)} mean: :{torch.mean(betting_map)}")
 
-            import torchvision.transforms as transforms
-            pilTrans = transforms.ToPILImage()
-            Img = betting_map[0,:,:,:].squeeze().to('cpu')
-            pilImg = pilTrans(Img)
-            pilImg.save(f"{self.iter_G}_test.jpg")
+            for batch in range(betting_map.shape[0]):
+                bet_Img = betting_map[batch, :, :, :].squeeze()[None, :, :]
+                input_Img = input_images[batch, :, :, :].squeeze()
+                # pilImg.save(f"{self.iter_G}_test.jpg")
+                self.storage.add_image("betting_map", bet_Img, self.iter)
+                self.storage.add_image("input_image", input_Img, self.iter)
 
             # weighting the loss with the output of the gambler
-            loss_func = torch.nn.CrossEntropyLoss(reduction="none")
+            # todo: ignore for retinanet - dimension doesn't change
+            loss_func = torch.nn.CrossEntropyLoss(reduction="none", ignore_index=-1)
             [B,C,_,_] = generated_output['pred_class_logits'][0].shape
             pred_class_logits = generated_output['pred_class_logits'][0].reshape(B, C, -1).detach()
             # Find places with highest CE
@@ -522,7 +531,7 @@ class GANTrainer(TrainerBase):
             logger.debug(f"Gambler bets: max:{torch.max(betting_map)} min:{torch.min(betting_map)} mean: :{torch.mean(betting_map)}")
 
             # weighting the loss with the output of the gambler
-            loss_func = torch.nn.CrossEntropyLoss(reduction="none")
+            loss_func = torch.nn.CrossEntropyLoss(reduction="none", ignore_index=-1)
             [B, C, _, _] = generated_output['pred_class_logits'][0].shape
             pred_class_logits = generated_output['pred_class_logits'][0].reshape(B, C, -1)
             # Find places with highest CE

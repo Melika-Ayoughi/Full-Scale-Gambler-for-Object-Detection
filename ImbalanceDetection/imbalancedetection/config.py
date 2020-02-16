@@ -12,9 +12,9 @@ def add_gambler_config(cfg):
     # VARIANTS: SimpleGambler - UnetGambler
     _C.MODEL.GAMBLER_HEAD.NAME = "UnetGambler"
     # number of iterations the gambler is trained before the detector is trained
-    _C.MODEL.GAMBLER_HEAD.GAMBLER_ITERATIONS = 10
+    _C.MODEL.GAMBLER_HEAD.GAMBLER_ITERATIONS = 20
     # number of iterations the detector is trained before the gambler is trained
-    _C.MODEL.GAMBLER_HEAD.DETECTOR_ITERATIONS = 10
+    _C.MODEL.GAMBLER_HEAD.DETECTOR_ITERATIONS = 20
     # VARIANTS: C(per class prediction) R(per region prediction) CR(both)
     _C.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT = "C"
     # initialize all these values to the default of the detector but can be changed later

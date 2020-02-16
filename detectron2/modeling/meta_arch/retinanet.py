@@ -159,7 +159,7 @@ class RetinaNet(nn.Module):
 
         pred_class_logits = pred_class_logits.reshape(pred_class_logits.shape[0], pred_class_logits.shape[1], -1)
         # print(pred_class_logits.shape, gt_classes.shape)
-        return F.cross_entropy(pred_class_logits, gt_classes, reduction="mean")
+        return F.cross_entropy(pred_class_logits, gt_classes, ignore_index=-1, reduction="mean")
 
     def smooth_l1_loss(self, gt_classes, gt_anchors_deltas, pred_anchor_deltas):
         """
@@ -290,7 +290,8 @@ class RetinaNet(nn.Module):
                 gt_classes_i[anchor_labels == 0] = self.num_classes
                 # Anchors with label -1 are ignored.
                 if (anchor_labels == -1).any():
-                    gt_classes_i[anchor_labels == -1] = self.num_classes #todo check: instead of -1 set them to bg
+                    # definitely wrong to set them to background, they should be ignored
+                    gt_classes_i[anchor_labels == -1] = -1
             else:
                 gt_classes_i = torch.zeros_like(gt_matched_idxs) + self.num_classes
                 gt_anchors_reg_deltas_i = torch.zeros_like(anchors_per_image.tensor)
@@ -367,8 +368,8 @@ class RetinaNet(nn.Module):
             predicted_prob = predicted_prob[keep_idxs]
             topk_idxs = topk_idxs[keep_idxs]
 
-            anchor_idxs = topk_idxs // self.num_classes
-            classes_idxs = topk_idxs % self.num_classes
+            anchor_idxs = topk_idxs // (self.num_classes+1)
+            classes_idxs = topk_idxs % (self.num_classes+1)
 
             box_reg_i = box_reg_i[anchor_idxs]
             anchors_i = anchors_i[anchor_idxs]
