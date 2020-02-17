@@ -34,6 +34,7 @@ from detectron2.evaluation import (
 from detectron2.evaluation.lvis_evaluation import LVISEvaluator
 from collections import OrderedDict
 from detectron2.utils.events import CommonMetricPrinter, JSONWriter, TensorboardXWriter
+from detectron2.utils.events import get_event_storage
 
 class GANTrainer(TrainerBase):
 
@@ -81,10 +82,8 @@ class GANTrainer(TrainerBase):
         )
 
         gambler_model_loc = os.path.join(cfg.OUTPUT_DIR, "gambler_models")
-        print(gambler_model_loc)
         os.makedirs(gambler_model_loc, exist_ok=True)
-        # if not os.path.exists(gambler_model_loc):
-        #     os.mkdir(gambler_model_loc)
+
         self.gambler_checkpointer = DetectionCheckpointer(
             # Assume you want to save checkpoints together with logs/statistics
             self.gambler_model,
@@ -111,17 +110,19 @@ class GANTrainer(TrainerBase):
             self.detection_checkpointer,
         )
         self.register_hooks(det_hooks)
-        gamb_hooks = self.build_hooks(
-            self.gambler_model,
-            self.gambler_optimizer,
-            self.gambler_scheduler,
-            self.gambler_checkpointer
-        )
+        # gamb_hooks = self.build_hooks(
+        #     self.gambler_model,
+        #     self.gambler_optimizer,
+        #     self.gambler_scheduler,
+        #     self.gambler_checkpointer
+        # )
 
-        self.register_hooks(gamb_hooks)
-
-        # self.writer = SummaryWriter(self.cfg.OUTPUT_DIR)
-
+        # self.register_hooks(gamb_hooks)
+        # if comm.is_main_process():
+        #     self.writer = SummaryWriter(self.cfg.OUTPUT_DIR)
+        self.gambler_loss_lambda = cfg.MODEL.GAMBLER_HEAD.GAMBLER_LAMBDA
+        self.regression_loss_lambda = cfg.MODEL.GAMBLER_HEAD.REGRESSION_LAMBDA
+        self.vis_period = cfg.MODEL.GAMBLER_HEAD.VIS_PERIOD
 
     @classmethod
     def build_optimizer_gambler(self, cfg, gambler_model) -> torch.optim.Optimizer:
@@ -249,12 +250,14 @@ class GANTrainer(TrainerBase):
         from imbalancedetection.gambler_heads import GamblerHeads
 
         # Perform evaluation only if the model is a meta architecture
-        if comm.get_world_size() > 1:
-            if not (isinstance(model.module, UNet) or isinstance(model.module, GamblerHeads)):
-                ret.append(hooks.EvalHook(cfg.TEST.EVAL_PERIOD, test_and_save_results))
-        elif comm.get_world_size() == 1:
-            if not (isinstance(model, UNet) or isinstance(model, GamblerHeads)):
-                ret.append(hooks.EvalHook(cfg.TEST.EVAL_PERIOD, test_and_save_results))
+        # if comm.get_world_size() > 1:
+        #     if not (isinstance(model.module, UNet) or isinstance(model.module, GamblerHeads)):
+        #         ret.append(hooks.EvalHook(cfg.TEST.EVAL_PERIOD, test_and_save_results))
+        # elif comm.get_world_size() == 1:
+        #     if not (isinstance(model, UNet) or isinstance(model, GamblerHeads)):
+        #         ret.append(hooks.EvalHook(cfg.TEST.EVAL_PERIOD, test_and_save_results))
+
+        ret.append(hooks.EvalHook(cfg.TEST.EVAL_PERIOD, test_and_save_results))
 
         if comm.is_main_process():
             # run writers in the end, so that evaluation metrics are written
@@ -455,6 +458,15 @@ class GANTrainer(TrainerBase):
             return evaluator_list[0]
         return DatasetEvaluators(evaluator_list)
 
+    def visualize_training(self, betting_map, input_images):
+        storage = get_event_storage()
+
+        for batch in range(betting_map.shape[0]):
+            bet_Img = betting_map[batch, :, :, :].squeeze()[None, :, :]
+            input_Img = input_images[batch, :, :, :].squeeze()
+            storage.put_image("betting_map", bet_Img)
+            storage.put_image("input_image", input_Img)
+
     def run_step(self):
         """
         Overwrites the run_step() function of SimpleTrainer(TrainerBase) to be compatible with GAN learning
@@ -484,12 +496,10 @@ class GANTrainer(TrainerBase):
             betting_map = self.gambler_model(gambler_input.detach())
             logger.debug(f"Gambler bets: max:{torch.max(betting_map)} min:{torch.min(betting_map)} mean: :{torch.mean(betting_map)}")
 
-            for batch in range(betting_map.shape[0]):
-                bet_Img = betting_map[batch, :, :, :].squeeze()[None, :, :]
-                input_Img = input_images[batch, :, :, :].squeeze()
-                # pilImg.save(f"{self.iter_G}_test.jpg")
-                self.storage.add_image("betting_map", bet_Img, self.iter)
-                self.storage.add_image("input_image", input_Img, self.iter)
+            if self.vis_period > 0:
+                storage = get_event_storage()
+                if storage.iter % self.vis_period == 0:
+                    self.visualize_training(betting_map, input_images)
 
             # weighting the loss with the output of the gambler
             # todo: ignore for retinanet - dimension doesn't change
@@ -500,9 +510,10 @@ class GANTrainer(TrainerBase):
             betting_map = betting_map.squeeze().reshape(betting_map.shape[0], -1)
 
             # Regularize the betting map
-            # betting_map = betting_map / (torch.sum(betting_map, dim=1)).reshape(betting_map.shape[0], 1).expand(betting_map.shape)
-            loss_gambler = -torch.mean(loss_func(pred_class_logits, gt_classes) * betting_map.reshape(betting_map.shape[0], -1))
+            betting_map = betting_map / (torch.sum(betting_map, dim=1)).reshape(betting_map.shape[0], 1).expand(betting_map.shape)
+            loss_gambler = -torch.mean(loss_func(pred_class_logits, gt_classes) * betting_map.reshape(betting_map.shape[0], -1)) * self.gambler_loss_lambda
 
+            loss_dict.update({"loss_box_reg": loss_dict["loss_box_reg"] * self.regression_loss_lambda})
             loss_detector = sum(loss for loss in loss_dict.values()) - loss_gambler
             self._detect_anomaly(loss_detector, loss_dict)
             loss_dict.update({"loss_gambler": loss_gambler})
@@ -512,7 +523,6 @@ class GANTrainer(TrainerBase):
 
             self.gambler_optimizer.zero_grad()
             loss_gambler.backward()
-            # print(list(self.gambler_model.parameters())[0].grad)
             self.gambler_optimizer.step()
 
             self.iter_G += 1
@@ -538,9 +548,10 @@ class GANTrainer(TrainerBase):
             betting_map = betting_map.squeeze().reshape(betting_map.shape[0], -1)
 
             # Regularize the betting map
-            # betting_map = betting_map / (torch.sum(betting_map, dim=1)).reshape(betting_map.shape[0], 1).expand(betting_map.shape)
-            loss_gambler = -torch.mean(loss_func(pred_class_logits, gt_classes) * betting_map.reshape(betting_map.shape[0], -1))
+            betting_map = betting_map / (torch.sum(betting_map, dim=1)).reshape(betting_map.shape[0], 1).expand(betting_map.shape)
+            loss_gambler = -torch.mean(loss_func(pred_class_logits, gt_classes) * betting_map.reshape(betting_map.shape[0], -1)) * self.gambler_loss_lambda
 
+            loss_dict.update({"loss_box_reg": loss_dict["loss_box_reg"] * self.regression_loss_lambda})
             loss_detector = sum(loss for loss in loss_dict.values()) - loss_gambler
             self._detect_anomaly(loss_detector, loss_dict)
             loss_dict.update({"loss_gambler": loss_gambler})

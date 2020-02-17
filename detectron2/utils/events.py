@@ -124,6 +124,11 @@ class TensorboardXWriter(EventWriter):
         for k, v in storage.latest_with_smoothing_hint(self._window_size).items():
             self._writer.add_scalar(k, v, storage.iter)
 
+        if len(storage.vis_data) >= 1:
+            for img_name, img, step_num in storage.vis_data:
+                self._writer.add_image(img_name, img, step_num)
+            storage.clear_images()
+
     def close(self):
         if hasattr(self, "_writer"):  # doesn't exist when the code fails at import
             self._writer.close()
@@ -212,6 +217,27 @@ class EventStorage:
         self._latest_scalars = {}
         self._iter = start_iter
         self._current_prefix = ""
+        self._vis_data = []
+
+    def put_image(self, img_name, img_tensor):
+        """
+        Add an `img_tensor` to the `_vis_data` associated with `img_name`.
+        Args:
+            img_name (str): The name of the image to put into tensorboard.
+            img_tensor (torch.Tensor or numpy.array): An `uint8` or `float`
+                Tensor of shape `[channel, height, width]` where `channel` is
+                3. The image format should be RGB. The elements in img_tensor
+                can either have values in [0, 1] (float32) or [0, 255] (uint8).
+                The `img_tensor` will be visualized in tensorboard.
+        """
+        self._vis_data.append((img_name, img_tensor, self._iter))
+
+    def clear_images(self):
+        """
+        Delete all the stored images for visualization. This should be called
+        after images are written to tensorboard.
+        """
+        self._vis_data = []
 
     def put_scalar(self, name, value, smoothing_hint=True):
         """
@@ -306,6 +332,10 @@ class EventStorage:
         """
         self._iter += 1
         self._latest_scalars = {}
+
+    @property
+    def vis_data(self):
+        return self._vis_data
 
     @property
     def iter(self):
