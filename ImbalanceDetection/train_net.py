@@ -464,8 +464,10 @@ class GANTrainer(TrainerBase):
         for batch in range(betting_map.shape[0]):
             bet_Img = betting_map[batch, :, :, :].squeeze()[None, :, :]
             input_Img = input_images[batch, :, :, :].squeeze()
-            storage.put_image("betting_map", bet_Img)
-            storage.put_image("input_image", input_Img)
+            temp = torch.cat((bet_Img, bet_Img, bet_Img), dim=0)
+            both = torch.cat((temp, input_Img), 2)
+            storage.put_image("input_betting_map", both)
+            break # only the first image in the batch
 
     def run_step(self):
         """
@@ -483,7 +485,7 @@ class GANTrainer(TrainerBase):
 
         input_images, generated_output, gt_classes, loss_dict = self.detection_model(data)
 
-        input_images = F.max_pool2d(input_images, kernel_size=1, stride=8) # todo: stride depends on feature map layer
+        input_images = F.max_pool2d(input_images, kernel_size=1, stride=16) # todo: stride depends on feature map layer
         # concatenate along the channel
         gambler_input = torch.cat((input_images, generated_output['pred_class_logits'][0]), dim=1)
 

@@ -8,11 +8,11 @@ MODEL:
     NUM_CLASSES: 80 #1230
 #    SCORE_THRESH_TEST: 0.0001
   ANCHOR_GENERATOR:
-    SIZES: !!python/object/apply:eval ["[[x] for x in [ 32 ]]"] # 1 scale (hopefully in the biggest feature map)
+    SIZES: !!python/object/apply:eval ["[[x] for x in [ 64 ]]"] # 1 scale (hopefully in the biggest feature map)
     ASPECT_RATIOS: [[1.0]]  # 1 aspect ratio
   RETINANET:
     NUM_CLASSES: 80
-    IN_FEATURES: ["p3"] # 1 feature map layer - p3 is stride 8 - original retinanet ["p3", "p4", "p5", "p6", "p7"]
+    IN_FEATURES: ["p4"] # 1 feature map layer - p3 is stride 8 - original retinanet ["p3", "p4", "p5", "p6", "p7"]
   GAMBLER_HEAD:
     NAME: "UnetGambler"
     GAMBLER_OUTPUT: "C"
