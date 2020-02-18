@@ -30,6 +30,7 @@ __all__ = [
     "build_detection_test_loader",
     "get_detection_dataset_dicts",
     "load_proposals_into_dataset",
+    "plot_instances_class_histogram",
     "print_instances_class_histogram",
 ]
 
@@ -159,6 +160,34 @@ def _quantize(x, bin_edges):
     return quantized
 
 
+def plot_instances_class_histogram(dataset_dicts, class_names):
+
+    import matplotlib.pyplot as plt
+    from detectron2.config import get_cfg
+    import os
+
+    import matplotlib as mpl
+    # mpl.style.use("seaborn-whitegrid")
+
+    num_classes = len(class_names)
+    hist_bins = np.arange(num_classes + 1)
+    histogram = np.zeros((num_classes,), dtype=np.int)
+    for entry in dataset_dicts:
+        annos = entry["annotations"]
+        classes = [x["category_id"] for x in annos if not x.get("iscrowd", 0)]
+        histogram += np.histogram(classes, bins=hist_bins)[0]
+
+    ind_sorted = np.argsort(histogram)[::-1]
+    bins = range(num_classes)
+    fig = plt.figure(figsize=(10, 8))
+    plt.bar(bins, height=histogram[ind_sorted])
+    plt.xticks(bins, np.array(class_names)[ind_sorted], rotation=90, fontsize=5)
+    # plt.yscale("log")
+    from detectron2.config import global_cfg
+    fig.savefig(os.path.join(global_cfg.OUTPUT_DIR, "instance_class_histogram.pdf"))
+    # plt.show()
+
+
 def print_instances_class_histogram(dataset_dicts, class_names):
     """
     Args:
@@ -286,6 +315,7 @@ def get_detection_dataset_dicts(
             class_names = MetadataCatalog.get(dataset_names[0]).thing_classes
             check_metadata_consistency("thing_classes", dataset_names)
             print_instances_class_histogram(dataset_dicts, class_names)
+            plot_instances_class_histogram(dataset_dicts, class_names)
         except AttributeError:  # class names are not available for this dataset
             pass
     return dataset_dicts

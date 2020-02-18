@@ -6,6 +6,7 @@ from .build import (
     build_detection_train_loader,
     get_detection_dataset_dicts,
     load_proposals_into_dataset,
+    plot_instances_class_histogram,
     print_instances_class_histogram,
 )
 from .catalog import DatasetCatalog, MetadataCatalog
