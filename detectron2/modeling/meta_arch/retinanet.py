@@ -136,7 +136,7 @@ class RetinaNet(nn.Module):
         if self.training:
             gt_classes, gt_anchors_reg_deltas = self.get_ground_truth(anchors, gt_instances)
             # todo: [0] because output of fpn is still a list
-            return images.tensor, {"pred_class_logits": box_cls, "pred_proposal_deltas": box_delta}, gt_classes,  self.ce_losses(gt_classes, gt_anchors_reg_deltas, box_cls[0], box_delta)
+            return self.losses(gt_classes, gt_anchors_reg_deltas, box_cls, box_delta)
         else:
             results = self.inference(box_cls, box_delta, anchors, images)
             processed_results = []
@@ -147,7 +147,7 @@ class RetinaNet(nn.Module):
                 width = input_per_image.get("width", image_size[1])
                 r = detector_postprocess(results_per_image, height, width)
                 processed_results.append({"instances": r})
-            return images.tensor, {"pred_class_logits": box_cls, "pred_proposal_deltas": box_delta}, None, processed_results
+            return processed_results
 
     def softmax_cross_entropy_loss(self, gt_classes, pred_class_logits):
         """
@@ -289,9 +289,9 @@ class RetinaNet(nn.Module):
                 # Anchors with label 0 are treated as background.
                 gt_classes_i[anchor_labels == 0] = self.num_classes
                 # Anchors with label -1 are ignored.
-                if (anchor_labels == -1).any():
-                    # definitely wrong to set them to background, they should be ignored
-                    gt_classes_i[anchor_labels == -1] = -1
+                # if (anchor_labels == -1).any():
+                #     # definitely wrong to set them to background, they should be ignored
+                gt_classes_i[anchor_labels == -1] = -1
             else:
                 gt_classes_i = torch.zeros_like(gt_matched_idxs) + self.num_classes
                 gt_anchors_reg_deltas_i = torch.zeros_like(anchors_per_image.tensor)
@@ -316,7 +316,7 @@ class RetinaNet(nn.Module):
         assert len(anchors) == len(images)
         results = []
 
-        box_cls = [permute_to_N_HWA_K(x, self.num_classes + 1) for x in box_cls]
+        box_cls = [permute_to_N_HWA_K(x, self.num_classes) for x in box_cls]
         box_delta = [permute_to_N_HWA_K(x, 4) for x in box_delta]
         # list[Tensor], one per level, each has shape (N, Hi x Wi x A, K or 4)
 
@@ -368,8 +368,8 @@ class RetinaNet(nn.Module):
             predicted_prob = predicted_prob[keep_idxs]
             topk_idxs = topk_idxs[keep_idxs]
 
-            anchor_idxs = topk_idxs // (self.num_classes+1)
-            classes_idxs = topk_idxs % (self.num_classes+1)
+            anchor_idxs = topk_idxs // (self.num_classes)
+            classes_idxs = topk_idxs % (self.num_classes)
 
             box_reg_i = box_reg_i[anchor_idxs]
             anchors_i = anchors_i[anchor_idxs]
@@ -437,7 +437,7 @@ class RetinaNetHead(nn.Module):
         self.cls_subnet = nn.Sequential(*cls_subnet)
         self.bbox_subnet = nn.Sequential(*bbox_subnet)
         self.cls_score = nn.Conv2d(
-            in_channels, num_anchors * (num_classes + 1), kernel_size=3, stride=1, padding=1
+            in_channels, num_anchors * (num_classes), kernel_size=3, stride=1, padding=1
         )
         self.bbox_pred = nn.Conv2d(in_channels, num_anchors * 4, kernel_size=3, stride=1, padding=1)
 

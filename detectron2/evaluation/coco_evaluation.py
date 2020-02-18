@@ -149,8 +149,8 @@ class COCOEvaluator(DatasetEvaluator):
             for result in self._coco_results:
                 # ignore background predictions during inference
                 category_id = result["category_id"]
-                if category_id == 80: # todo: not hardcoded!
-                    continue
+                # if category_id == 80: # todo: not hardcoded!
+                #     continue
                 assert (
                     category_id in reverse_id_mapping
                 ), "A prediction has category_id={}, which is not available in the dataset.".format(
