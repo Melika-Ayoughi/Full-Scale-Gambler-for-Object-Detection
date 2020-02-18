@@ -36,6 +36,7 @@ from detectron2.evaluation import (
     verify_results,
 )
 from detectron2.modeling import GeneralizedRCNNWithTTA
+from detectron2.config import set_global_cfg
 
 
 class Trainer(DefaultTrainer):
@@ -119,6 +120,7 @@ def setup(args):
     cfg.merge_from_list(args.opts)
     cfg.freeze()
     default_setup(cfg, args)
+    set_global_cfg(cfg)
     return cfg
 
 

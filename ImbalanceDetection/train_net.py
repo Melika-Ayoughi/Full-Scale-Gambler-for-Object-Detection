@@ -485,7 +485,10 @@ class GANTrainer(TrainerBase):
 
         input_images, generated_output, gt_classes, loss_dict = self.detection_model(data)
 
-        input_images = F.max_pool2d(input_images, kernel_size=1, stride=16) # todo: stride depends on feature map layer
+        stride = 16
+        # input_images = input_images[:, :, ::stride, ::stride]
+        input_images = F.interpolate(input_images, scale_factor=1 / stride) # todo: stride depends on feature map layer
+        # input_images = F.max_pool2d(input_images, kernel_size=1, stride=16)
         # concatenate along the channel
         gambler_input = torch.cat((input_images, generated_output['pred_class_logits'][0]), dim=1)
 

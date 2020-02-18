@@ -27,4 +27,4 @@ SOLVER:
   CHECKPOINT_PERIOD: 1500
   WARMUP_FACTOR: 0.00333333
   WARMUP_ITERS: 300
-OUTPUT_DIR: "./output/retinanet_baselines/simple_overfit_fasterloss_for_pretrain"
+OUTPUT_DIR: "./output/retinanet_baselines/debug_debug_debug"

@@ -556,6 +556,7 @@ _C.SEED = -1
 # If input images have the same or similar sizes, benchmark is often helpful.
 _C.CUDNN_BENCHMARK = False
 
+_C.MODEL.GAMBLER_ON = False
 # global config is for quick hack purposes.
 # You can set them in command line or config files,
 # and access it with:
