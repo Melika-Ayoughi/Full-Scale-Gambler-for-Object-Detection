@@ -163,8 +163,9 @@ def _quantize(x, bin_edges):
 def plot_instances_class_histogram(dataset_dicts, class_names):
 
     import matplotlib.pyplot as plt
-    from detectron2.config import get_cfg
+    from detectron2.config import global_cfg
     import os
+    from detectron2.utils.events import get_event_storage
 
     import matplotlib as mpl
     # mpl.style.use("seaborn-whitegrid")
@@ -177,14 +178,19 @@ def plot_instances_class_histogram(dataset_dicts, class_names):
         classes = [x["category_id"] for x in annos if not x.get("iscrowd", 0)]
         histogram += np.histogram(classes, bins=hist_bins)[0]
 
+    np.save(os.path.join(global_cfg.OUTPUT_DIR, 'histogram.npy'), histogram)
+    np.save(os.path.join(global_cfg.OUTPUT_DIR, 'class_names.npy'), class_names)
+
     ind_sorted = np.argsort(histogram)[::-1]
     bins = range(num_classes)
     fig = plt.figure(figsize=(10, 8))
-    plt.bar(bins, height=histogram[ind_sorted])
+    plt.bar(bins, height=histogram[ind_sorted], color='#3DA4AB')
     plt.xticks(bins, np.array(class_names)[ind_sorted], rotation=90, fontsize=5)
     # plt.yscale("log")
-    from detectron2.config import global_cfg
+
     fig.savefig(os.path.join(global_cfg.OUTPUT_DIR, "instance_class_histogram.pdf"))
+    # storage = get_event_storage()
+    # storage.put_fig("instance_class_histogram", fig)
     # plt.show()
 
 

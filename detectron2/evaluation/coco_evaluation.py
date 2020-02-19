@@ -24,7 +24,9 @@ from detectron2.structures import Boxes, BoxMode, pairwise_iou
 from detectron2.utils.logger import create_small_table
 
 from .evaluator import DatasetEvaluator
-
+from detectron2.config import global_cfg
+import matplotlib.pyplot as plt
+from detectron2.utils.events import get_event_storage
 
 class COCOEvaluator(DatasetEvaluator):
     """
@@ -270,6 +272,19 @@ class COCOEvaluator(DatasetEvaluator):
             precision = precision[precision > -1]
             ap = np.mean(precision) if precision.size else float("nan")
             results_per_category.append(("{}".format(name), float(ap * 100)))
+
+        histogram = np.load(os.path.join(global_cfg.OUTPUT_DIR, 'histogram.npy'))
+        ind_sorted = np.argsort(histogram)[::-1]
+        a = np.array(results_per_category)[ind_sorted]
+        bins = range(len(class_names))
+
+        fig = plt.figure(figsize=(10, 8))
+        plt.bar(bins, height=a[:, 1].astype(float), color='#F6CD61')
+        plt.xticks(bins, np.array(class_names)[ind_sorted], rotation=90, fontsize=5)
+        storage = get_event_storage()
+        storage.put_fig("AP", fig)
+        fig.savefig(os.path.join(global_cfg.OUTPUT_DIR, "AP_"+str(storage.iter)+".pdf"))
+
 
         # tabulate it
         N_COLS = min(6, len(results_per_category) * 2)
