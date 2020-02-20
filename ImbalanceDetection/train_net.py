@@ -68,6 +68,26 @@ def permute_all_cls_to_N_HWA_K_and_concat(box_cls, num_classes=80):
     # box_delta = cat(box_delta_flattened, dim=1).reshape(-1, 4)
     return box_cls
 
+def permute_all_weights_to_N_HWA_K_and_concat(weights, num_classes=80, normalize_w= False):
+    """
+    Rearrange the tensor layout from the network output, i.e.:
+    list[Tensor]: #lvl tensors of shape (N, A x K, Hi, Wi)
+    to per-image predictions, i.e.:
+    Tensor: of shape (N x sum(Hi x Wi x A), K)
+    """
+    # for each feature level, permute the outputs to make them be in the
+    # same format as the labels. Note that the labels are computed for
+    # all feature levels concatenated, so we keep the same representation
+    # for the objectness and the box_delta
+    weights_flattened = [permute_to_N_HWA_K(w, num_classes) for w in weights] # Size=(N,HWA,K)
+    if normalize_w is True:
+        weights_flattened = [w / torch.sum(w, dim=[1, 2], keepdim=True) for w in weights_flattened]
+    # concatenate on the first dimension (representing the feature levels), to
+    # take into account the way the labels were generated (with all feature maps
+    # being concatenated as well)
+    weights_flattened = cat(weights_flattened, dim=1).reshape(-1, num_classes)
+    return weights_flattened
+
 class GANTrainer(TrainerBase):
 
     def __init__(self, cfg):
@@ -521,12 +541,17 @@ class GANTrainer(TrainerBase):
                                                                                                   -1)) * self.gambler_loss_lambda
         return loss_gambler
 
-    def sigmoid_gambler_loss(self, pred_class_logits, weights, gt_classes):
+    def sigmoid_gambler_loss(self, pred_class_logits, weights, gt_classes, normalize_w=False, detach_pred=False):
+
+        if detach_pred is True:
+            pred_class_logits = [p.detach() for p in pred_class_logits]
+
         num_classes = 80 #todo from cfg
         # prepare weights
-        weights = permute_all_cls_to_N_HWA_K_and_concat([weights], 1)
+        weights = permute_all_weights_to_N_HWA_K_and_concat([weights], 1, normalize_w)
 
         [N, C] = weights.shape
+        # class-agnostic weights
         if C == 1:
             weights = weights.expand(N, num_classes)
 
@@ -651,14 +676,14 @@ class GANTrainer(TrainerBase):
                 if storage.iter % self.vis_period == 0:
                     self.visualize_training(betting_map, input_images)
 
-            loss_before_weighting, loss_gambler = self.sigmoid_gambler_loss(generated_output['pred_class_logits'], betting_map, gt_classes) * self.gambler_loss_lambda #todo not detaching
+            loss_before_weighting, loss_gambler = self.sigmoid_gambler_loss(generated_output['pred_class_logits'], betting_map, gt_classes, normalize_w=True, detach_pred=True)  #todo not detaching
             # loss_gambler = self.softmax_ce_gambler_loss(generated_output['pred_class_logits'][0].detach(), betting_map, gt_classes)
 
             loss_dict.update({"loss_box_reg": loss_dict["loss_box_reg"] * self.regression_loss_lambda})
-            loss_detector = sum(loss for loss in loss_dict.values()) - loss_gambler
-            self._detect_anomaly(loss_detector, loss_dict)
-            loss_dict.update({"loss_gambler": loss_gambler})
+            loss_dict.update({"loss_gambler": loss_gambler * self.gambler_loss_lambda})
             loss_dict.update({"loss_before_weighting": loss_before_weighting})
+            loss_detector = loss_dict["loss_box_reg"] + loss_dict["loss_cls"] - loss_gambler
+            self._detect_anomaly(loss_detector, loss_dict)
             self._detect_anomaly(loss_gambler, loss_dict)
             metrics_dict = loss_dict
             metrics_dict["data_time/gambler_iter"] = data_time
@@ -679,18 +704,18 @@ class GANTrainer(TrainerBase):
             logger.debug(f"Gambler bets: max:{torch.max(betting_map)} min:{torch.min(betting_map)} mean: :{torch.mean(betting_map)}")
 
             # weighting the loss with the output of the gambler
-            loss_before_weighting, loss_gambler = self.sigmoid_gambler_loss(generated_output['pred_class_logits'], betting_map, gt_classes) * self.gambler_loss_lambda # todo not detaching
+            loss_before_weighting, loss_gambler = self.sigmoid_gambler_loss(generated_output['pred_class_logits'], betting_map, gt_classes, normalize_w=True) # todo not detaching
             # loss_gambler = self.softmax_ce_gambler_loss(generated_output['pred_class_logits'][0].detach(), betting_map, gt_classes)
 
             loss_dict.update({"loss_box_reg": loss_dict["loss_box_reg"] * self.regression_loss_lambda})
-            loss_detector = sum(loss for loss in loss_dict.values()) - loss_gambler
-            self._detect_anomaly(loss_detector, loss_dict)
-            loss_dict.update({"loss_gambler": loss_gambler})
+            loss_dict.update({"loss_gambler": loss_gambler * self.gambler_loss_lambda})
             loss_dict.update({"loss_before_weighting": loss_before_weighting})
+            loss_detector = loss_dict["loss_box_reg"] + loss_dict["loss_cls"] - loss_gambler
+
+            self._detect_anomaly(loss_detector, loss_dict)
             self._detect_anomaly(loss_gambler, loss_dict)
             metrics_dict = loss_dict
             metrics_dict["data_time/detector_iter"] = data_time
-            self._write_metrics(metrics_dict)
 
             self.detection_optimizer.zero_grad()
             loss_detector.backward()
@@ -701,8 +726,6 @@ class GANTrainer(TrainerBase):
                 logger.info("Finished training Detector")
                 self.iter_G = 0
                 self.iter_D = 0
-
-            # self.gambler_model.train()
 
         self._write_metrics(metrics_dict)
 
