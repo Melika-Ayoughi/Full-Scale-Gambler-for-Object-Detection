@@ -3,7 +3,7 @@ import logging
 import math
 from typing import List
 import torch
-from fvcore.nn import sigmoid_focal_loss_jit, smooth_l1_loss
+from fvcore.nn import sigmoid_focal_loss_jit, smooth_l1_loss, sigmoid_focal_loss
 from torch import nn
 
 from detectron2.layers import ShapeSpec, batched_nms, cat
@@ -97,6 +97,7 @@ class RetinaNet(nn.Module):
         pixel_mean = torch.Tensor(cfg.MODEL.PIXEL_MEAN).to(self.device).view(3, 1, 1)
         pixel_std = torch.Tensor(cfg.MODEL.PIXEL_STD).to(self.device).view(3, 1, 1)
         self.normalizer = lambda x: (x - pixel_mean) / pixel_std
+        self.denormalizer = lambda x: (x * pixel_std) + pixel_mean
         self.to(self.device)
 
     def forward(self, batched_inputs):
@@ -136,7 +137,7 @@ class RetinaNet(nn.Module):
         if self.training:
             gt_classes, gt_anchors_reg_deltas = self.get_ground_truth(anchors, gt_instances)
             # todo: [0] because output of fpn is still a list
-            return self.losses(gt_classes, gt_anchors_reg_deltas, box_cls, box_delta)
+            return images.tensor, {"pred_class_logits": box_cls, "pred_proposal_deltas": box_delta}, gt_classes, self.losses(gt_classes, gt_anchors_reg_deltas, box_cls, box_delta)
         else:
             results = self.inference(box_cls, box_delta, anchors, images)
             processed_results = []
@@ -147,7 +148,7 @@ class RetinaNet(nn.Module):
                 width = input_per_image.get("width", image_size[1])
                 r = detector_postprocess(results_per_image, height, width)
                 processed_results.append({"instances": r})
-            return processed_results
+            return images.tensor, {"pred_class_logits": box_cls, "pred_proposal_deltas": box_delta}, None, processed_results
 
     def softmax_cross_entropy_loss(self, gt_classes, pred_class_logits):
         """
@@ -222,7 +223,7 @@ class RetinaNet(nn.Module):
         gt_classes_target[foreground_idxs, gt_classes[foreground_idxs]] = 1
 
         # logits loss
-        loss_cls = sigmoid_focal_loss_jit(
+        loss_cls = sigmoid_focal_loss(
             pred_class_logits[valid_idxs],
             gt_classes_target[valid_idxs],
             alpha=self.focal_loss_alpha,
@@ -239,6 +240,65 @@ class RetinaNet(nn.Module):
         ) / max(1, num_foreground)
 
         return {"loss_cls": loss_cls, "loss_box_reg": loss_box_reg}
+
+    def sigmoid_loss(
+            self,
+            inputs,
+            targets,
+            weights,
+            mode: 'none',
+            alpha: float = -1,
+            gamma: float = 2,
+            reduction: str = "none",
+    ):
+        """
+        Weighted sigmoid loss that could be like focal loss
+        Args:
+            inputs: A float tensor of arbitrary shape.
+                    The predictions for each example.
+            targets: A float tensor with the same shape as inputs. Stores the binary
+                     classification label for each element in inputs
+                    (0 for the negative class and 1 for the positive class).
+            weights: A float tensor, shape is dependent on config (N, 1, Hi, Wi) or (N, C, Hi, Wi)
+            mode: (optional) A string that specifies the mode of this loss
+                    'none': weighted bce loss
+                    'focal': weighted focal loss
+            alpha: (optional) Weighting factor in range (0,1) to balance
+                    positive vs negative examples. Default = -1 (no weighting).
+            gamma: Exponent of the modulating factor (1 - p_t) to
+                   balance easy vs hard examples.
+            reduction: 'none' | 'mean' | 'sum'
+                     'none': No reduction will be applied to the output.
+                     'mean': The output will be averaged.
+                     'sum': The output will be summed.
+        Returns:
+            Loss tensor with the reduction option applied.
+        """
+        p = torch.sigmoid(inputs)
+        ce_loss = F.binary_cross_entropy_with_logits( #(N x R, K)
+            inputs, targets, reduction="none"
+        )
+        p_t = p * targets + (1 - p) * (1 - targets)
+
+        if mode == "focal":
+            loss = ce_loss * ((1 - p_t) ** gamma)
+            if alpha >= 0:
+                alpha_t = alpha * targets + (1 - alpha) * (1 - targets)
+                loss = alpha_t * loss
+        elif mode == "none":
+            loss = ce_loss
+        else:
+            logging.error("No mode it selected for the retinanet loss!!")
+            loss = None
+
+        loss = weights * loss # todo check the dimensions of the weights!
+
+        if reduction == "mean":
+            loss = loss.mean()
+        elif reduction == "sum":
+            loss = loss.sum()
+
+        return loss
 
     @torch.no_grad()
     def get_ground_truth(self, anchors, targets):
@@ -400,6 +460,9 @@ class RetinaNet(nn.Module):
         images = [self.normalizer(x) for x in images]
         images = ImageList.from_tensors(images, self.backbone.size_divisibility)
         return images
+
+    def postprocess_image(self, images_tensor):
+        return self.denormalizer(images_tensor)
 
 
 class RetinaNetHead(nn.Module):

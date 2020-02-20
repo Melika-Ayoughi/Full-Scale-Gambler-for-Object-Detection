@@ -18,13 +18,13 @@ DATASETS:
 #TEST:
 #  DETECTIONS_PER_IMAGE: 300  # LVIS allows up to 300
 TEST:
-    EVAL_PERIOD: 100
+    EVAL_PERIOD: 1500
 SOLVER:
-  IMS_PER_BATCH: 8
+  IMS_PER_BATCH: 4
   BASE_LR: 0.02
   STEPS: (20000, 25000)
   MAX_ITER: 30000
   CHECKPOINT_PERIOD: 1500
   WARMUP_FACTOR: 0.00333333
   WARMUP_ITERS: 300
-OUTPUT_DIR: "./output/retinanet_baselines/debug"
+OUTPUT_DIR: "./output/retinanet_baselines/debug_debug_debug"

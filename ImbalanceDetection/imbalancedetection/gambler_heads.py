@@ -41,9 +41,9 @@ class UnetGambler(UNet):
     def __init__(self, cfg, bilinear=True): # todo read from cfg
         self.device = torch.device(cfg.MODEL.DEVICE)
 
-        in_channels = 84 # 81 + 3
+        in_channels = cfg.MODEL.GAMBLER_HEAD.GAMBLER_IN_CHANNELS # 81 + 3
         # also weighting the bg class cause it's easier for now cause it matches the ce loss of detection
-        out_channels = 1 #used to be 81
+        out_channels = cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUT_CHANNELS #used to be 81
         '''
         if cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "C":
             out_channels = cfg.MODEL.ROI_HEADS.NUM_CLASSES

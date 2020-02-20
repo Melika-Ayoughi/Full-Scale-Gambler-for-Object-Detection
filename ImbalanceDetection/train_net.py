@@ -36,6 +36,38 @@ from collections import OrderedDict
 from detectron2.utils.events import CommonMetricPrinter, JSONWriter, TensorboardXWriter
 from detectron2.utils.events import get_event_storage
 
+def permute_to_N_HWA_K(tensor, K):
+    """
+    Transpose/reshape a tensor from (N, (A x K), H, W) to (N, (HxWxA), K)
+    """
+    assert tensor.dim() == 4, tensor.shape
+    N, _, H, W = tensor.shape
+    tensor = tensor.view(N, -1, K, H, W)
+    tensor = tensor.permute(0, 3, 4, 1, 2)
+    tensor = tensor.reshape(N, -1, K)  # Size=(N,HWA,K)
+    return tensor
+
+
+def permute_all_cls_to_N_HWA_K_and_concat(box_cls, num_classes=80):
+    """
+    Rearrange the tensor layout from the network output, i.e.:
+    list[Tensor]: #lvl tensors of shape (N, A x K, Hi, Wi)
+    to per-image predictions, i.e.:
+    Tensor: of shape (N x sum(Hi x Wi x A), K)
+    """
+    # for each feature level, permute the outputs to make them be in the
+    # same format as the labels. Note that the labels are computed for
+    # all feature levels concatenated, so we keep the same representation
+    # for the objectness and the box_delta
+    box_cls_flattened = [permute_to_N_HWA_K(x, num_classes) for x in box_cls]
+    # box_delta_flattened = [permute_to_N_HWA_K(x, 4) for x in box_delta]
+    # concatenate on the first dimension (representing the feature levels), to
+    # take into account the way the labels were generated (with all feature maps
+    # being concatenated as well)
+    box_cls = cat(box_cls_flattened, dim=1).reshape(-1, num_classes)
+    # box_delta = cat(box_delta_flattened, dim=1).reshape(-1, 4)
+    return box_cls
+
 class GANTrainer(TrainerBase):
 
     def __init__(self, cfg):
@@ -287,16 +319,16 @@ class GANTrainer(TrainerBase):
         all_metrics_dict = comm.gather(metrics_dict)
 
         if comm.is_main_process():
-            if "data_time/gambler" in all_metrics_dict[0]:
+            if "data_time/gambler_iter" in all_metrics_dict[0]:
                 # data_time among workers can have high variance. The actual latency
                 # caused by data_time is the maximum among workers.
-                data_time = np.max([x.pop("data_time/gambler") for x in all_metrics_dict])
-                self.storage.put_scalar("data_time/gambler", data_time)
-            elif "data_time/detector" in all_metrics_dict[0]:
+                data_time = np.max([x.pop("data_time/gambler_iter") for x in all_metrics_dict])
+                self.storage.put_scalar("data_time/gambler_iter", data_time)
+            elif "data_time/detector_iter" in all_metrics_dict[0]:
                 # data_time among workers can have high variance. The actual latency
                 # caused by data_time is the maximum among workers.
-                data_time = np.max([x.pop("data_time/detector") for x in all_metrics_dict])
-                self.storage.put_scalar("data_time/detector", data_time)
+                data_time = np.max([x.pop("data_time/detector_iter") for x in all_metrics_dict])
+                self.storage.put_scalar("data_time/detector_iter", data_time)
 
             # average the rest metrics
             metrics_dict = {
@@ -469,6 +501,115 @@ class GANTrainer(TrainerBase):
             storage.put_image("input_betting_map", both)
             break # only the first image in the batch
 
+    def softmax_ce_gambler_loss(self, predictions, betting_map, gt_classes):
+
+        # weighting the loss with the output of the gambler
+        # todo: ignore for retinanet - dimension doesn't change
+        loss_func = torch.nn.CrossEntropyLoss(reduction="none", ignore_index=-1)
+        [B, C, _, _] = predictions.shape
+        pred_class_logits = predictions.reshape(B, C, -1).detach()
+        # Find places with highest CE
+        betting_map = betting_map.squeeze().reshape(betting_map.shape[0], -1)
+
+        # Regularize the betting map
+        betting_map = betting_map / (torch.sum(betting_map, dim=1)).reshape(betting_map.shape[0], 1).expand(
+            betting_map.shape)
+        loss_gambler = -torch.mean(loss_func(pred_class_logits, gt_classes) * betting_map.reshape(betting_map.shape[0],
+                                                                                                  -1)) * self.gambler_loss_lambda
+        return loss_gambler
+
+    def sigmoid_gambler_loss(self, pred_class_logits, weights, gt_classes):
+        num_classes = 80 #todo from cfg
+        # prepare weights
+        weights = permute_all_cls_to_N_HWA_K_and_concat([weights], 1)
+
+        [N, C] = weights.shape
+        if C == 1:
+            weights = weights.expand(N, num_classes)
+
+        pred_class_logits = permute_all_cls_to_N_HWA_K_and_concat(
+            pred_class_logits, num_classes
+        )  # Shapes: (N x R, K) and (N x R, 4), respectively.
+
+        gt_classes = gt_classes.flatten()
+        valid_idxs = gt_classes >= 0
+        foreground_idxs = (gt_classes >= 0) & (gt_classes != num_classes)
+        num_foreground = foreground_idxs.sum()
+
+        gt_classes_target = torch.zeros_like(pred_class_logits)
+        gt_classes_target[foreground_idxs, gt_classes[foreground_idxs]] = 1
+
+        # logits loss
+        loss_cls = self.sigmoid_loss(
+            pred_class_logits[valid_idxs],
+            gt_classes_target[valid_idxs],
+            weights[valid_idxs],  # -1 labels are ignored for calculating the loss
+            mode='none',
+            alpha=self.cfg.MODEL.RETINANET.FOCAL_LOSS_ALPHA,
+            gamma=self.cfg.MODEL.RETINANET.FOCAL_LOSS_GAMMA,
+            reduction="sum") / max(1, num_foreground)
+
+        return loss_cls
+
+    def sigmoid_loss(
+            self,
+            inputs,
+            targets,
+            weights,
+            mode: 'none',
+            alpha: float = -1,
+            gamma: float = 2,
+            reduction: str = "none",
+    ):
+        """
+        Weighted sigmoid loss that could be like focal loss
+        Args:
+            inputs: A float tensor of arbitrary shape.
+                    The predictions for each example.
+            targets: A float tensor with the same shape as inputs. Stores the binary
+                     classification label for each element in inputs
+                    (0 for the negative class and 1 for the positive class).
+            weights: A float tensor, shape is dependent on config (N, 1, Hi, Wi) or (N, C, Hi, Wi)
+            mode: (optional) A string that specifies the mode of this loss
+                    'none': weighted bce loss
+                    'focal': weighted focal loss
+            alpha: (optional) Weighting factor in range (0,1) to balance
+                    positive vs negative examples. Default = -1 (no weighting).
+            gamma: Exponent of the modulating factor (1 - p_t) to
+                   balance easy vs hard examples.
+            reduction: 'none' | 'mean' | 'sum'
+                     'none': No reduction will be applied to the output.
+                     'mean': The output will be averaged.
+                     'sum': The output will be summed.
+        Returns:
+            Loss tensor with the reduction option applied.
+        """
+        p = torch.sigmoid(inputs)
+        ce_loss = F.binary_cross_entropy_with_logits( #(N x R, K)
+            inputs, targets, reduction="none"
+        )
+        p_t = p * targets + (1 - p) * (1 - targets)
+
+        if mode == "focal":
+            loss = ce_loss * ((1 - p_t) ** gamma)
+            if alpha >= 0:
+                alpha_t = alpha * targets + (1 - alpha) * (1 - targets)
+                loss = alpha_t * loss
+        elif mode == "none":
+            loss = ce_loss
+        else:
+            logging.error("No mode it selected for the retinanet loss!!")
+            loss = None
+
+        loss = -weights * loss # todo check the dimensions of the weights!
+
+        if reduction == "mean":
+            loss = loss.mean()
+        elif reduction == "sum":
+            loss = loss.sum()
+
+        return loss
+
     def run_step(self):
         """
         Overwrites the run_step() function of SimpleTrainer(TrainerBase) to be compatible with GAN learning
@@ -495,9 +636,6 @@ class GANTrainer(TrainerBase):
         if self.iter_G < self.max_iter_gambler:
             logger.info(f"Iteration {self.iter} in Gambler")
 
-            # self.detection_model.eval()
-            # self.gambler_model.train()
-
             betting_map = self.gambler_model(gambler_input.detach())
             logger.debug(f"Gambler bets: max:{torch.max(betting_map)} min:{torch.min(betting_map)} mean: :{torch.mean(betting_map)}")
 
@@ -506,22 +644,14 @@ class GANTrainer(TrainerBase):
                 if storage.iter % self.vis_period == 0:
                     self.visualize_training(betting_map, input_images)
 
-            # weighting the loss with the output of the gambler
-            # todo: ignore for retinanet - dimension doesn't change
-            loss_func = torch.nn.CrossEntropyLoss(reduction="none", ignore_index=-1)
-            [B,C,_,_] = generated_output['pred_class_logits'][0].shape
-            pred_class_logits = generated_output['pred_class_logits'][0].reshape(B, C, -1).detach()
-            # Find places with highest CE
-            betting_map = betting_map.squeeze().reshape(betting_map.shape[0], -1)
-
-            # Regularize the betting map
-            betting_map = betting_map / (torch.sum(betting_map, dim=1)).reshape(betting_map.shape[0], 1).expand(betting_map.shape)
-            loss_gambler = -torch.mean(loss_func(pred_class_logits, gt_classes) * betting_map.reshape(betting_map.shape[0], -1)) * self.gambler_loss_lambda
+            loss_gambler = self.sigmoid_gambler_loss(generated_output['pred_class_logits'], betting_map, gt_classes) * self.gambler_loss_lambda #todo not detaching
+            # loss_gambler = self.softmax_ce_gambler_loss(generated_output['pred_class_logits'][0].detach(), betting_map, gt_classes)
 
             loss_dict.update({"loss_box_reg": loss_dict["loss_box_reg"] * self.regression_loss_lambda})
             loss_detector = sum(loss for loss in loss_dict.values()) - loss_gambler
             self._detect_anomaly(loss_detector, loss_dict)
-            loss_dict.update({"loss_gambler": loss_gambler})
+            # gambler loss is saved as -loss_gambler because in the total loss function is needs to be negated
+            loss_dict.update({"loss_gambler": -loss_gambler})
             self._detect_anomaly(loss_gambler, loss_dict)
             metrics_dict = loss_dict
             metrics_dict["data_time/gambler_iter"] = data_time
@@ -534,32 +664,22 @@ class GANTrainer(TrainerBase):
             if self.iter_G == self.max_iter_gambler:
                 logger.info("Finished training Gambler")
 
-            # self.detection_model.train()
         else:
             logger.info(f"Iteration {self.iter} in Detector")
-
-            # self.detection_model.train()
-            # self.gambler_model.eval()
 
             betting_map = self.gambler_model(gambler_input)
             # logger.debug(f"Gambler bets: {betting_map}")
             logger.debug(f"Gambler bets: max:{torch.max(betting_map)} min:{torch.min(betting_map)} mean: :{torch.mean(betting_map)}")
 
             # weighting the loss with the output of the gambler
-            loss_func = torch.nn.CrossEntropyLoss(reduction="none", ignore_index=-1)
-            [B, C, _, _] = generated_output['pred_class_logits'][0].shape
-            pred_class_logits = generated_output['pred_class_logits'][0].reshape(B, C, -1)
-            # Find places with highest CE
-            betting_map = betting_map.squeeze().reshape(betting_map.shape[0], -1)
-
-            # Regularize the betting map
-            betting_map = betting_map / (torch.sum(betting_map, dim=1)).reshape(betting_map.shape[0], 1).expand(betting_map.shape)
-            loss_gambler = -torch.mean(loss_func(pred_class_logits, gt_classes) * betting_map.reshape(betting_map.shape[0], -1)) * self.gambler_loss_lambda
+            loss_gambler = self.sigmoid_gambler_loss(generated_output['pred_class_logits'], betting_map, gt_classes) * self.gambler_loss_lambda # todo not detaching
+            # loss_gambler = self.softmax_ce_gambler_loss(generated_output['pred_class_logits'][0].detach(), betting_map, gt_classes)
 
             loss_dict.update({"loss_box_reg": loss_dict["loss_box_reg"] * self.regression_loss_lambda})
             loss_detector = sum(loss for loss in loss_dict.values()) - loss_gambler
             self._detect_anomaly(loss_detector, loss_dict)
-            loss_dict.update({"loss_gambler": loss_gambler})
+            # gambler loss is saved as -loss_gambler because in the total loss function is needs to be negated
+            loss_dict.update({"loss_gambler": -loss_gambler})
             self._detect_anomaly(loss_gambler, loss_dict)
             metrics_dict = loss_dict
             metrics_dict["data_time/detector_iter"] = data_time
