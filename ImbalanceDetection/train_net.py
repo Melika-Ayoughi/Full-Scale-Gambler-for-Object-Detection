@@ -334,7 +334,10 @@ class GANTrainer(TrainerBase):
             metrics_dict = {
                 k: np.mean([x[k] for x in all_metrics_dict]) for k in all_metrics_dict[0].keys()
             }
-            total_losses_reduced = sum(loss for loss in metrics_dict.values())
+            if "loss_gambler" in all_metrics_dict[0]:
+                total_losses_reduced = metrics_dict["loss_box_reg"] + metrics_dict["loss_cls"] - metrics_dict["loss_gambler"]
+            else:
+                total_losses_reduced = sum(loss for loss in metrics_dict.values())
 
             self.storage.put_scalar("total_loss", total_losses_reduced)
             if len(metrics_dict) > 1:
@@ -540,16 +543,17 @@ class GANTrainer(TrainerBase):
         gt_classes_target[foreground_idxs, gt_classes[foreground_idxs]] = 1
 
         # logits loss
-        loss_cls = self.sigmoid_loss(
+        loss_before_weighting, loss_cls = self.sigmoid_loss(
             pred_class_logits[valid_idxs],
             gt_classes_target[valid_idxs],
             weights[valid_idxs],  # -1 labels are ignored for calculating the loss
             mode='none',
             alpha=self.cfg.MODEL.RETINANET.FOCAL_LOSS_ALPHA,
             gamma=self.cfg.MODEL.RETINANET.FOCAL_LOSS_GAMMA,
-            reduction="sum") / max(1, num_foreground)
-
-        return loss_cls
+            reduction="sum")
+        loss_cls = loss_cls /max(1, num_foreground)
+        loss_before_weighting = loss_before_weighting /max(1, num_foreground)
+        return loss_before_weighting, loss_cls
 
     def sigmoid_loss(
             self,
@@ -601,14 +605,17 @@ class GANTrainer(TrainerBase):
             logging.error("No mode it selected for the retinanet loss!!")
             loss = None
 
+        sigmoid_loss_before_weighting = loss
         loss = -weights * loss # todo check the dimensions of the weights!
 
         if reduction == "mean":
             loss = loss.mean()
+            sigmoid_loss_before_weighting = sigmoid_loss_before_weighting.mean()
         elif reduction == "sum":
             loss = loss.sum()
+            sigmoid_loss_before_weighting = sigmoid_loss_before_weighting.sum()
 
-        return loss
+        return sigmoid_loss_before_weighting, loss
 
     def run_step(self):
         """
@@ -644,14 +651,14 @@ class GANTrainer(TrainerBase):
                 if storage.iter % self.vis_period == 0:
                     self.visualize_training(betting_map, input_images)
 
-            loss_gambler = self.sigmoid_gambler_loss(generated_output['pred_class_logits'], betting_map, gt_classes) * self.gambler_loss_lambda #todo not detaching
+            loss_before_weighting, loss_gambler = self.sigmoid_gambler_loss(generated_output['pred_class_logits'], betting_map, gt_classes) * self.gambler_loss_lambda #todo not detaching
             # loss_gambler = self.softmax_ce_gambler_loss(generated_output['pred_class_logits'][0].detach(), betting_map, gt_classes)
 
             loss_dict.update({"loss_box_reg": loss_dict["loss_box_reg"] * self.regression_loss_lambda})
             loss_detector = sum(loss for loss in loss_dict.values()) - loss_gambler
             self._detect_anomaly(loss_detector, loss_dict)
-            # gambler loss is saved as -loss_gambler because in the total loss function is needs to be negated
-            loss_dict.update({"loss_gambler": -loss_gambler})
+            loss_dict.update({"loss_gambler": loss_gambler})
+            loss_dict.update({"loss_before_weighting": loss_before_weighting})
             self._detect_anomaly(loss_gambler, loss_dict)
             metrics_dict = loss_dict
             metrics_dict["data_time/gambler_iter"] = data_time
@@ -672,14 +679,14 @@ class GANTrainer(TrainerBase):
             logger.debug(f"Gambler bets: max:{torch.max(betting_map)} min:{torch.min(betting_map)} mean: :{torch.mean(betting_map)}")
 
             # weighting the loss with the output of the gambler
-            loss_gambler = self.sigmoid_gambler_loss(generated_output['pred_class_logits'], betting_map, gt_classes) * self.gambler_loss_lambda # todo not detaching
+            loss_before_weighting, loss_gambler = self.sigmoid_gambler_loss(generated_output['pred_class_logits'], betting_map, gt_classes) * self.gambler_loss_lambda # todo not detaching
             # loss_gambler = self.softmax_ce_gambler_loss(generated_output['pred_class_logits'][0].detach(), betting_map, gt_classes)
 
             loss_dict.update({"loss_box_reg": loss_dict["loss_box_reg"] * self.regression_loss_lambda})
             loss_detector = sum(loss for loss in loss_dict.values()) - loss_gambler
             self._detect_anomaly(loss_detector, loss_dict)
-            # gambler loss is saved as -loss_gambler because in the total loss function is needs to be negated
-            loss_dict.update({"loss_gambler": -loss_gambler})
+            loss_dict.update({"loss_gambler": loss_gambler})
+            loss_dict.update({"loss_before_weighting": loss_before_weighting})
             self._detect_anomaly(loss_gambler, loss_dict)
             metrics_dict = loss_dict
             metrics_dict["data_time/detector_iter"] = data_time
