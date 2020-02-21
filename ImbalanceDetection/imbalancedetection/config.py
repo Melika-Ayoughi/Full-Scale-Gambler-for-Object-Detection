@@ -14,7 +14,7 @@ def add_gambler_config(cfg):
     # number of iterations the gambler is trained before the detector is trained
     _C.MODEL.GAMBLER_HEAD.GAMBLER_ITERATIONS = 20
     # number of iterations the detector is trained before the gambler is trained
-    _C.MODEL.GAMBLER_HEAD.DETECTOR_ITERATIONS = 40
+    _C.MODEL.GAMBLER_HEAD.DETECTOR_ITERATIONS = 0
     # VARIANTS: C(per class prediction) R(per region prediction) CR(both)
     _C.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT = "C"
     # Number of input channels to the gambler module (num_classes + 3 (input channel RGB))

@@ -35,6 +35,8 @@ from detectron2.evaluation.lvis_evaluation import LVISEvaluator
 from collections import OrderedDict
 from detectron2.utils.events import CommonMetricPrinter, JSONWriter, TensorboardXWriter
 from detectron2.utils.events import get_event_storage
+from torchvision.utils import make_grid
+
 
 def permute_to_N_HWA_K(tensor, K):
     """
@@ -68,6 +70,7 @@ def permute_all_cls_to_N_HWA_K_and_concat(box_cls, num_classes=80):
     # box_delta = cat(box_delta_flattened, dim=1).reshape(-1, 4)
     return box_cls
 
+
 def permute_all_weights_to_N_HWA_K_and_concat(weights, num_classes=80, normalize_w= False):
     """
     Rearrange the tensor layout from the network output, i.e.:
@@ -88,6 +91,7 @@ def permute_all_weights_to_N_HWA_K_and_concat(weights, num_classes=80, normalize
     weights_flattened = cat(weights_flattened, dim=1).reshape(-1, num_classes)
     return weights_flattened
 
+
 class GANTrainer(TrainerBase):
 
     def __init__(self, cfg):
@@ -101,6 +105,9 @@ class GANTrainer(TrainerBase):
         self.gambler_model = build_gambler(cfg).train()
         self.detection_model = build_detector(cfg).train()
 
+        DetectionCheckpointer(self.detection_model, save_dir=cfg.OUTPUT_DIR).resume_or_load(cfg.MODEL.WEIGHTS, resume=True)
+
+
         self.gambler_optimizer = self.build_optimizer_gambler(cfg, self.gambler_model)
         self.detection_optimizer = self.build_optimizer_detector(cfg, self.detection_model)
 
@@ -111,9 +118,9 @@ class GANTrainer(TrainerBase):
             self.gambler_model = DistributedDataParallel(
                 self.gambler_model, device_ids=[comm.get_local_rank()], broadcast_buffers=False
             )
-            self.detection_model = DistributedDataParallel(
-                self.detection_model, device_ids=[comm.get_local_rank()], broadcast_buffers=False, find_unused_parameters=True,
-            )
+            # self.detection_model = DistributedDataParallel(
+            #     self.detection_model, device_ids=[comm.get_local_rank()], broadcast_buffers=False, find_unused_parameters=True,
+            # )
 
         self.data_loader = data_loader
         self._data_loader_iter = iter(data_loader)
@@ -329,6 +336,9 @@ class GANTrainer(TrainerBase):
         Args:
             metrics_dict (dict): dict of scalar metrics
         """
+        if metrics_dict == {}:
+            logging.debug(" There are no metrics to print!")
+            return
         metrics_dict = {
             k: v.detach().cpu().item() if isinstance(v, torch.Tensor) else float(v)
             for k, v in metrics_dict.items()
@@ -356,10 +366,10 @@ class GANTrainer(TrainerBase):
             }
             if "loss_gambler" in all_metrics_dict[0]:
                 total_losses_reduced = metrics_dict["loss_box_reg"] + metrics_dict["loss_cls"] - metrics_dict["loss_gambler"]
+                self.storage.put_scalar("loss_detector", total_losses_reduced)
             else:
                 total_losses_reduced = sum(loss for loss in metrics_dict.values())
-
-            self.storage.put_scalar("total_loss", total_losses_reduced)
+                self.storage.put_scalar("total_loss", total_losses_reduced)
             if len(metrics_dict) > 1:
                 self.storage.put_scalars(**metrics_dict)
 
@@ -515,14 +525,17 @@ class GANTrainer(TrainerBase):
 
     def visualize_training(self, betting_map, input_images):
         storage = get_event_storage()
+        device = torch.device(global_cfg.MODEL.DEVICE)
 
-        for batch in range(betting_map.shape[0]):
-            bet_Img = betting_map[batch, :, :, :].squeeze()[None, :, :]
-            input_Img = input_images[batch, :, :, :].squeeze()
-            temp = torch.cat((bet_Img, bet_Img, bet_Img), dim=0)
-            both = torch.cat((temp, input_Img), 2)
-            storage.put_image("input_betting_map", both)
-            break # only the first image in the batch
+        pixel_mean = torch.Tensor(global_cfg.MODEL.PIXEL_MEAN).to(device).view(3, 1, 1)
+        pixel_std = torch.Tensor(global_cfg.MODEL.PIXEL_STD).to(device).view(3, 1, 1)
+        denormalizer = lambda x: (x * pixel_std) + pixel_mean
+        input_images = denormalizer(input_images)
+
+        input_grid = make_grid(input_images, nrow=2)
+        betting_map_grid = make_grid(torch.cat((betting_map, betting_map, betting_map), dim=1), nrow=2)
+        both = torch.cat((betting_map_grid, input_grid), dim=1)
+        storage.put_image("input_betting_map", both)
 
     def softmax_ce_gambler_loss(self, predictions, betting_map, gt_classes):
 
@@ -546,7 +559,7 @@ class GANTrainer(TrainerBase):
         if detach_pred is True:
             pred_class_logits = [p.detach() for p in pred_class_logits]
 
-        num_classes = 80 #todo from cfg
+        num_classes = global_cfg.MODEL.RETINANET.NUM_CLASSES
         # prepare weights
         weights = permute_all_weights_to_N_HWA_K_and_concat([weights], 1, normalize_w)
 
@@ -660,7 +673,7 @@ class GANTrainer(TrainerBase):
 
         stride = 16
         # input_images = input_images[:, :, ::stride, ::stride]
-        input_images = F.interpolate(input_images, scale_factor=1 / stride) # todo: stride depends on feature map layer
+        input_images = F.interpolate(input_images, scale_factor=1 / stride, mode='nearest') # todo: stride depends on feature map layer
         # input_images = F.max_pool2d(input_images, kernel_size=1, stride=16)
         # concatenate along the channel
         gambler_input = torch.cat((input_images, generated_output['pred_class_logits'][0]), dim=1)
@@ -682,7 +695,7 @@ class GANTrainer(TrainerBase):
             loss_dict.update({"loss_box_reg": loss_dict["loss_box_reg"] * self.regression_loss_lambda})
             loss_dict.update({"loss_gambler": loss_gambler * self.gambler_loss_lambda})
             loss_dict.update({"loss_before_weighting": loss_before_weighting})
-            loss_detector = loss_dict["loss_box_reg"] + loss_dict["loss_cls"] - loss_gambler
+            loss_detector = loss_dict["loss_box_reg"] + loss_dict["loss_cls"] - loss_dict["loss_gambler"]
             self._detect_anomaly(loss_detector, loss_dict)
             self._detect_anomaly(loss_gambler, loss_dict)
             metrics_dict = loss_dict
@@ -696,7 +709,7 @@ class GANTrainer(TrainerBase):
             if self.iter_G == self.max_iter_gambler:
                 logger.info("Finished training Gambler")
 
-        else:
+        elif self.iter_D < self.max_iter_detector:
             logger.info(f"Iteration {self.iter} in Detector")
 
             betting_map = self.gambler_model(gambler_input)
@@ -710,7 +723,7 @@ class GANTrainer(TrainerBase):
             loss_dict.update({"loss_box_reg": loss_dict["loss_box_reg"] * self.regression_loss_lambda})
             loss_dict.update({"loss_gambler": loss_gambler * self.gambler_loss_lambda})
             loss_dict.update({"loss_before_weighting": loss_before_weighting})
-            loss_detector = loss_dict["loss_box_reg"] + loss_dict["loss_cls"] - loss_gambler
+            loss_detector = loss_dict["loss_box_reg"] + loss_dict["loss_cls"] - loss_dict["loss_gambler"]
 
             self._detect_anomaly(loss_detector, loss_dict)
             self._detect_anomaly(loss_gambler, loss_dict)
@@ -726,7 +739,11 @@ class GANTrainer(TrainerBase):
                 logger.info("Finished training Detector")
                 self.iter_G = 0
                 self.iter_D = 0
-
+        else:
+            metrics_dict = {}
+            logger.debug("Neither D_iter nor G_iter! Debugging with fixed detector!")
+            self.iter_G = 0
+            self.iter_D = 0
         self._write_metrics(metrics_dict)
 
 
