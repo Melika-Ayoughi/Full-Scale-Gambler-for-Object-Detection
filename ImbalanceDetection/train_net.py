@@ -169,16 +169,14 @@ class GANTrainer(TrainerBase):
             self.detection_checkpointer,
         )
         self.register_hooks(det_hooks)
-        # gamb_hooks = self.build_hooks(
-        #     self.gambler_model,
-        #     self.gambler_optimizer,
-        #     self.gambler_scheduler,
-        #     self.gambler_checkpointer
-        # )
+        gamb_hooks = self.build_hooks_gambler(
+            self.gambler_model,
+            self.gambler_optimizer,
+            self.gambler_scheduler,
+            self.gambler_checkpointer
+        )
 
-        # self.register_hooks(gamb_hooks)
-        # if comm.is_main_process():
-        #     self.writer = SummaryWriter(self.cfg.OUTPUT_DIR)
+        self.register_hooks(gamb_hooks)
         self.gambler_loss_lambda = cfg.MODEL.GAMBLER_HEAD.GAMBLER_LAMBDA
         self.regression_loss_lambda = cfg.MODEL.GAMBLER_HEAD.REGRESSION_LAMBDA
         self.vis_period = cfg.MODEL.GAMBLER_HEAD.VIS_PERIOD
@@ -321,6 +319,64 @@ class GANTrainer(TrainerBase):
         if comm.is_main_process():
             # run writers in the end, so that evaluation metrics are written
             ret.append(hooks.PeriodicWriter(self.build_writers()))
+        return ret
+
+    def build_hooks_gambler(self, model, optimizer, scheduler, checkpointer):
+        """
+        Build a list of default hooks, including timing, evaluation,
+        checkpointing, lr scheduling, precise BN, writing events.
+
+        Returns:
+            list[HookBase]:
+        """
+        cfg = self.cfg.clone()
+        cfg.defrost()
+        cfg.DATALOADER.NUM_WORKERS = 0  # save some memory and time for PreciseBN
+
+        ret = [
+            # hooks.IterationTimer(),
+            hooks.LRScheduler(optimizer, scheduler),
+            hooks.PreciseBN(
+                # Run at the same freq as (but before) evaluation.
+                cfg.TEST.EVAL_PERIOD,
+                model,
+                # Build a new data loader to not affect training
+                self.build_train_loader(cfg),
+                cfg.TEST.PRECISE_BN.NUM_ITER,
+            )
+            if cfg.TEST.PRECISE_BN.ENABLED and get_bn_modules(model)
+            else None,
+        ]
+
+        # Do PreciseBN before checkpointer, because it updates the model and need to
+        # be saved by checkpointer.
+        # This is not always the best: if checkpointing has a different frequency,
+        # some checkpoints may have more precise statistics than others.
+        if comm.is_main_process():
+            ret.append(hooks.PeriodicCheckpointer(checkpointer, cfg.SOLVER.CHECKPOINT_PERIOD))
+
+        def test_and_save_results():
+            self._last_eval_results = self.test(self.cfg, model)
+            return self._last_eval_results
+
+        # Do evaluation after checkpointer, because then if it fails,
+        # we can use the saved checkpoint to debug.
+        from imbalancedetection.modelling.unet import UNet
+        from imbalancedetection.gambler_heads import GamblerHeads
+
+        # Perform evaluation only if the model is a meta architecture
+        # if comm.get_world_size() > 1:
+        #     if not (isinstance(model.module, UNet) or isinstance(model.module, GamblerHeads)):
+        #         ret.append(hooks.EvalHook(cfg.TEST.EVAL_PERIOD, test_and_save_results))
+        # elif comm.get_world_size() == 1:
+        #     if not (isinstance(model, UNet) or isinstance(model, GamblerHeads)):
+        #         ret.append(hooks.EvalHook(cfg.TEST.EVAL_PERIOD, test_and_save_results))
+
+        # ret.append(hooks.EvalHook(cfg.TEST.EVAL_PERIOD, test_and_save_results))
+
+        # if comm.is_main_process():
+        #     # run writers in the end, so that evaluation metrics are written
+        #     ret.append(hooks.PeriodicWriter(self.build_writers()))
         return ret
 
     def _detect_anomaly(self, losses, loss_dict):
@@ -589,8 +645,8 @@ class GANTrainer(TrainerBase):
             alpha=self.cfg.MODEL.RETINANET.FOCAL_LOSS_ALPHA,
             gamma=self.cfg.MODEL.RETINANET.FOCAL_LOSS_GAMMA,
             reduction="sum")
-        loss_cls = loss_cls /max(1, num_foreground)
-        loss_before_weighting = loss_before_weighting /max(1, num_foreground)
+        loss_cls /= max(1, num_foreground)
+        loss_before_weighting /= max(1, num_foreground)
         return loss_before_weighting, loss_cls
 
     def sigmoid_loss(
