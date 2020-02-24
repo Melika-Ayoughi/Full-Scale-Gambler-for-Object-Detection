@@ -2,8 +2,8 @@ _BASE_: "./simple_retinanet.yaml"
 MODEL:
   WEIGHTS: "./output/retinanet_baselines/simple_retina_overfit/1gpu_scale64_p4_lr2/model_final.pth"
   GAMBLER_HEAD:
-    BASE_LR: 0.0001
+    BASE_LR: 0.001
 SOLVER:
   BASE_LR: 0.0001
 #  WEIGHT_DECAY: 0.0005
-OUTPUT_DIR: "./output/gambler/debug"
+OUTPUT_DIR: "./output/gambler/lr/lr_instead_of_budget"

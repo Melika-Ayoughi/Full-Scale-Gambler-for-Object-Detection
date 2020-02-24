@@ -775,7 +775,8 @@ class GANTrainer(TrainerBase):
                     self.visualize_training(gt_classes, y, betting_map, input_images)
 
             loss_dict.update({"loss_box_reg": loss_dict["loss_box_reg"] * self.regression_loss_lambda})
-            loss_dict.update({"loss_gambler": loss_gambler * self.gambler_loss_lambda})
+            loss_gambler = loss_gambler * self.gambler_loss_lambda
+            loss_dict.update({"loss_gambler": loss_gambler})
             loss_dict.update({"loss_before_weighting": loss_before_weighting})
             loss_detector = loss_dict["loss_box_reg"] + loss_dict["loss_cls"] - loss_dict["loss_gambler"]
             self._detect_anomaly(loss_detector, loss_dict)

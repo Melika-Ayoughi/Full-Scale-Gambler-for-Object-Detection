@@ -22,7 +22,7 @@ def add_gambler_config(cfg):
     # Number of output channels of the gambler module (desired betting map channels)
     _C.MODEL.GAMBLER_HEAD.GAMBLER_OUT_CHANNELS = 1
     # Hyperparameter lambda that multiplies the gambler loss
-    _C.MODEL.GAMBLER_HEAD.GAMBLER_LAMBDA = 1000
+    _C.MODEL.GAMBLER_HEAD.GAMBLER_LAMBDA = 10000
     # Hyperparameter lambda that multiplies the regression loss
     _C.MODEL.GAMBLER_HEAD.REGRESSION_LAMBDA = 1
     # The period (in terms of steps) for minibatch visualization at train time.
