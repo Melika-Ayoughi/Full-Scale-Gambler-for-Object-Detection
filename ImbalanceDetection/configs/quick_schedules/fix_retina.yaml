@@ -6,4 +6,4 @@ MODEL:
 SOLVER:
   BASE_LR: 0.0001
 #  WEIGHT_DECAY: 0.0005
-OUTPUT_DIR: "./output/gambler/fix_retina_lre4"
+OUTPUT_DIR: "./output/gambler/debug"

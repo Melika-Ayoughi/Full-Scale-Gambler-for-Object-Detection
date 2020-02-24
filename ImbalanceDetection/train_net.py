@@ -35,7 +35,7 @@ from detectron2.evaluation.lvis_evaluation import LVISEvaluator
 from collections import OrderedDict
 from detectron2.utils.events import CommonMetricPrinter, JSONWriter, TensorboardXWriter
 from detectron2.utils.events import get_event_storage
-from torchvision.utils import make_grid
+from torchvision.utils import make_grid, save_image
 
 
 def permute_to_N_HWA_K(tensor, K):
@@ -579,18 +579,28 @@ class GANTrainer(TrainerBase):
             return evaluator_list[0]
         return DatasetEvaluators(evaluator_list)
 
-    def visualize_training(self, betting_map, input_images):
+    def visualize_training(self, gt_classes, y, betting_map, input_images):
+
+        [n, c, w, h] = y.shape
+        gt = gt_classes.reshape(n, w, h, c)
+        gt = gt.permute(0, 3, 1, 2)
+        gt_grid = make_grid(torch.cat((gt,gt,gt), dim=1)/255., nrow=2)
+
         storage = get_event_storage()
         device = torch.device(global_cfg.MODEL.DEVICE)
 
         pixel_mean = torch.Tensor(global_cfg.MODEL.PIXEL_MEAN).to(device).view(3, 1, 1)
         pixel_std = torch.Tensor(global_cfg.MODEL.PIXEL_STD).to(device).view(3, 1, 1)
         denormalizer = lambda x: (x * pixel_std) + pixel_mean
+        # print("debug_debug_melika_@@@@@@@@@@@@@@@", torch.max(input_images))
         input_images = denormalizer(input_images)
 
-        input_grid = make_grid(input_images, nrow=2)
+        input_grid = make_grid(input_images/255., nrow=2)
+        # print("debug_debug_melika" , torch.max(input_images))
+        # save_image(input_images/255., global_cfg.OUTPUT_DIR + "/test.jpg", nrow=2)
         betting_map_grid = make_grid(torch.cat((betting_map, betting_map, betting_map), dim=1), nrow=2)
-        both = torch.cat((betting_map_grid, input_grid), dim=1)
+        loss_grid = make_grid(torch.cat((y,y,y), dim=1), nrow=2)
+        both = torch.cat((gt_grid, loss_grid, betting_map_grid, input_grid), dim=1)
         storage.put_image("input_betting_map", both)
 
     def softmax_ce_gambler_loss(self, predictions, betting_map, gt_classes):
@@ -612,6 +622,7 @@ class GANTrainer(TrainerBase):
 
     def sigmoid_gambler_loss(self, pred_class_logits, weights, gt_classes, normalize_w=False, detach_pred=False):
 
+        [n,c,w,h] = pred_class_logits[0].shape
         if detach_pred is True:
             pred_class_logits = [p.detach() for p in pred_class_logits]
 
@@ -645,9 +656,16 @@ class GANTrainer(TrainerBase):
             alpha=self.cfg.MODEL.RETINANET.FOCAL_LOSS_ALPHA,
             gamma=self.cfg.MODEL.RETINANET.FOCAL_LOSS_GAMMA,
             reduction="sum")
-        loss_cls /= max(1, num_foreground)
-        loss_before_weighting /= max(1, num_foreground)
-        return loss_before_weighting, loss_cls
+        loss_cls = loss_cls / max(1, num_foreground)
+        device = self.cfg.MODEL.DEVICE
+        y = -25 * torch.ones((list(valid_idxs.shape)[0], 80)).to(device)
+        y[valid_idxs, :] = loss_before_weighting.clone().detach()
+        y = y.reshape(n, w, h, c)
+        y = y.permute(0, 3, 1, 2)
+        y = y.sum(dim=1, keepdim=True)
+        loss_before_weighting = loss_before_weighting.sum()
+        loss_before_weighting = loss_before_weighting / max(1, num_foreground)
+        return y, loss_before_weighting, loss_cls
 
     def sigmoid_loss(
             self,
@@ -699,15 +717,15 @@ class GANTrainer(TrainerBase):
             logging.error("No mode it selected for the retinanet loss!!")
             loss = None
 
-        sigmoid_loss_before_weighting = loss
-        loss = -weights * loss # todo check the dimensions of the weights!
+        sigmoid_loss_before_weighting = loss.clone().detach()
+        loss = -weights * loss
 
         if reduction == "mean":
             loss = loss.mean()
             sigmoid_loss_before_weighting = sigmoid_loss_before_weighting.mean()
         elif reduction == "sum":
             loss = loss.sum()
-            sigmoid_loss_before_weighting = sigmoid_loss_before_weighting.sum()
+            # sigmoid_loss_before_weighting = sigmoid_loss_before_weighting.sum()
 
         return sigmoid_loss_before_weighting, loss
 
@@ -729,24 +747,32 @@ class GANTrainer(TrainerBase):
 
         stride = 16
         # input_images = input_images[:, :, ::stride, ::stride]
-        input_images = F.interpolate(input_images, scale_factor=1 / stride, mode='nearest') # todo: stride depends on feature map layer
+        input_images = F.interpolate(input_images, scale_factor=1 / stride, mode='bilinear') # todo: stride depends on feature map layer
         # input_images = F.max_pool2d(input_images, kernel_size=1, stride=16)
         # concatenate along the channel
-        gambler_input = torch.cat((input_images, generated_output['pred_class_logits'][0]), dim=1)
-
+        sigmoid_predictions = torch.sigmoid(generated_output['pred_class_logits'][0])
+        # print(f"min logits: {torch.min(sigmoid_predictions)} max logits: {torch.max(sigmoid_predictions)}")
+        scaled_prob = (sigmoid_predictions - 0.5) * 256
+        # print(f"min predictions: {torch.min(scaled_prob)} max predictions: {torch.max(scaled_prob)}")
+        # print(f"min image input: {torch.min(input_images)} max input images: {torch.max(input_images)}")
+        gambler_input = torch.cat((input_images, scaled_prob), dim=1)
+        # print(f"min gambler input: {torch.min(gambler_input)} max gambler input: {torch.max(gambler_input)}")
         if self.iter_G < self.max_iter_gambler:
+            self.detection_model.eval()
+            self.gambler_model.train()
+
             logger.info(f"Iteration {self.iter} in Gambler")
 
-            betting_map = self.gambler_model(gambler_input.detach())
-            logger.debug(f"Gambler bets: max:{torch.max(betting_map)} min:{torch.min(betting_map)} mean: :{torch.mean(betting_map)}")
+            betting_map = self.gambler_model(gambler_input)
+            logger.debug(f"Gambler bets: max:{torch.max(betting_map)} min:{torch.min(betting_map)} mean:{torch.mean(betting_map)}")
+
+            y, loss_before_weighting, loss_gambler = self.sigmoid_gambler_loss(generated_output['pred_class_logits'], betting_map, gt_classes, normalize_w=True, detach_pred=False)  #todo not detaching
+            # loss_gambler = self.softmax_ce_gambler_loss(generated_output['pred_class_logits'][0].detach(), betting_map, gt_classes)
 
             if self.vis_period > 0:
                 storage = get_event_storage()
                 if storage.iter % self.vis_period == 0:
-                    self.visualize_training(betting_map, input_images)
-
-            loss_before_weighting, loss_gambler = self.sigmoid_gambler_loss(generated_output['pred_class_logits'], betting_map, gt_classes, normalize_w=True, detach_pred=True)  #todo not detaching
-            # loss_gambler = self.softmax_ce_gambler_loss(generated_output['pred_class_logits'][0].detach(), betting_map, gt_classes)
+                    self.visualize_training(gt_classes, y, betting_map, input_images)
 
             loss_dict.update({"loss_box_reg": loss_dict["loss_box_reg"] * self.regression_loss_lambda})
             loss_dict.update({"loss_gambler": loss_gambler * self.gambler_loss_lambda})
@@ -759,7 +785,13 @@ class GANTrainer(TrainerBase):
 
             self.gambler_optimizer.zero_grad()
             loss_gambler.backward()
+            # for name, param in self.gambler_model.named_parameters():
+            #     print(param.requires_grad)
+            # print(self.gambler_model.module.outc.conv.weight.grad)
             self.gambler_optimizer.step()
+
+            self.detection_model.train()
+            self.gambler_model.train()
 
             self.iter_G += 1
             if self.iter_G == self.max_iter_gambler:
