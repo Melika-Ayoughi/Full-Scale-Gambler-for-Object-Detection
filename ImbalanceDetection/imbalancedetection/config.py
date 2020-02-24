@@ -25,6 +25,7 @@ def add_gambler_config(cfg):
     _C.MODEL.GAMBLER_HEAD.GAMBLER_LAMBDA = 10000
     # Hyperparameter lambda that multiplies the regression loss
     _C.MODEL.GAMBLER_HEAD.REGRESSION_LAMBDA = 1
+    _C.MODEL.GAMBLER_HEAD.GAMBLER_TEMPERATURE = 0.02
     # The period (in terms of steps) for minibatch visualization at train time.
     # Set to 0 to disable.
     _C.MODEL.GAMBLER_HEAD.VIS_PERIOD = 300

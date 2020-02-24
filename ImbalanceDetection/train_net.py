@@ -83,6 +83,7 @@ def permute_all_weights_to_N_HWA_K_and_concat(weights, num_classes=80, normalize
     # all feature levels concatenated, so we keep the same representation
     # for the objectness and the box_delta
     weights_flattened = [permute_to_N_HWA_K(w, num_classes) for w in weights] # Size=(N,HWA,K)
+    weights_flattened = [w + global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_TEMPERATURE for w in weights_flattened]
     if normalize_w is True:
         weights_flattened = [w / torch.sum(w, dim=[1, 2], keepdim=True) for w in weights_flattened]
     # concatenate on the first dimension (representing the feature levels), to
