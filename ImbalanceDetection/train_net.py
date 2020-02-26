@@ -106,7 +106,7 @@ class GANTrainer(TrainerBase):
         self.gambler_model = build_gambler(cfg).train()
         self.detection_model = build_detector(cfg).train()
 
-        DetectionCheckpointer(self.detection_model, save_dir=cfg.OUTPUT_DIR).resume_or_load(cfg.MODEL.WEIGHTS, resume=True)
+        # DetectionCheckpointer(self.detection_model, save_dir=cfg.OUTPUT_DIR).resume_or_load(cfg.MODEL.WEIGHTS, resume=True)
 
 
         self.gambler_optimizer = self.build_optimizer_gambler(cfg, self.gambler_model)
@@ -119,9 +119,9 @@ class GANTrainer(TrainerBase):
             self.gambler_model = DistributedDataParallel(
                 self.gambler_model, device_ids=[comm.get_local_rank()], broadcast_buffers=False
             )
-            # self.detection_model = DistributedDataParallel(
-            #     self.detection_model, device_ids=[comm.get_local_rank()], broadcast_buffers=False, find_unused_parameters=True,
-            # )
+            self.detection_model = DistributedDataParallel(
+                self.detection_model, device_ids=[comm.get_local_rank()], broadcast_buffers=False, find_unused_parameters=True,
+            )
 
         self.data_loader = data_loader
         self._data_loader_iter = iter(data_loader)
@@ -585,7 +585,16 @@ class GANTrainer(TrainerBase):
         [n, c, w, h] = y.shape
         gt = gt_classes.reshape(n, w, h, c)
         gt = gt.permute(0, 3, 1, 2)
-        gt_grid = make_grid(torch.cat((gt,gt,gt), dim=1)/255., nrow=2)
+        gt_grid = make_grid(gt/80., nrow=2)
+        # save_image(gt/80., os.path.join(global_cfg.OUTPUT_DIR, "", "gt.jpg"), nrow=2)
+
+        a = gt>=0
+        b = gt<80
+        c = a * b
+        gt[c] = 0.5
+        gt[gt==-1] = 0
+        gt[gt==80] = 1
+        save_image(gt / 1., os.path.join(global_cfg.OUTPUT_DIR, str(self.iter) + "iter_gt.jpg"), nrow=2)
 
         storage = get_event_storage()
         device = torch.device(global_cfg.MODEL.DEVICE)
@@ -599,10 +608,10 @@ class GANTrainer(TrainerBase):
         input_grid = make_grid(input_images/255., nrow=2)
         # print("debug_debug_melika" , torch.max(input_images))
         # save_image(input_images/255., global_cfg.OUTPUT_DIR + "/test.jpg", nrow=2)
-        betting_map_grid = make_grid(torch.cat((betting_map, betting_map, betting_map), dim=1), nrow=2)
-        loss_grid = make_grid(torch.cat((y,y,y), dim=1), nrow=2)
-        both = torch.cat((gt_grid, loss_grid, betting_map_grid, input_grid), dim=1)
-        storage.put_image("input_betting_map", both)
+        betting_map_grid = make_grid(betting_map, nrow=2)
+        loss_grid = make_grid(y, nrow=2)
+        all = torch.cat((gt_grid, loss_grid, betting_map_grid, input_grid), dim=1)
+        storage.put_image("input_betting_map", all)
 
     def softmax_ce_gambler_loss(self, predictions, betting_map, gt_classes):
 
@@ -800,6 +809,9 @@ class GANTrainer(TrainerBase):
                 logger.info("Finished training Gambler")
 
         elif self.iter_D < self.max_iter_detector:
+            self.detection_model.train()
+            self.gambler_model.eval()
+
             logger.info(f"Iteration {self.iter} in Detector")
 
             betting_map = self.gambler_model(gambler_input)
@@ -807,11 +819,12 @@ class GANTrainer(TrainerBase):
             logger.debug(f"Gambler bets: max:{torch.max(betting_map)} min:{torch.min(betting_map)} mean: :{torch.mean(betting_map)}")
 
             # weighting the loss with the output of the gambler
-            loss_before_weighting, loss_gambler = self.sigmoid_gambler_loss(generated_output['pred_class_logits'], betting_map, gt_classes, normalize_w=True) # todo not detaching
+            _, loss_before_weighting, loss_gambler = self.sigmoid_gambler_loss(generated_output['pred_class_logits'], betting_map, gt_classes, normalize_w=True, detach_pred=False) # todo not detaching
             # loss_gambler = self.softmax_ce_gambler_loss(generated_output['pred_class_logits'][0].detach(), betting_map, gt_classes)
 
             loss_dict.update({"loss_box_reg": loss_dict["loss_box_reg"] * self.regression_loss_lambda})
-            loss_dict.update({"loss_gambler": loss_gambler * self.gambler_loss_lambda})
+            loss_gambler = loss_gambler * self.gambler_loss_lambda
+            loss_dict.update({"loss_gambler": loss_gambler})
             loss_dict.update({"loss_before_weighting": loss_before_weighting})
             loss_detector = loss_dict["loss_box_reg"] + loss_dict["loss_cls"] - loss_dict["loss_gambler"]
 
@@ -824,6 +837,10 @@ class GANTrainer(TrainerBase):
             loss_detector.backward()
             torch.nn.utils.clip_grad_norm_(self.detection_model.parameters(), 10)
             self.detection_optimizer.step()
+
+            self.detection_model.train()
+            self.gambler_model.train()
+
             self.iter_D += 1
             if self.iter_D == self.max_iter_detector:
                 logger.info("Finished training Detector")

@@ -12,6 +12,8 @@ MODEL:
   RETINANET:
     NUM_CLASSES: 80
     IN_FEATURES: ["p4"] # 1 feature map layer - p3 is stride 8 - original retinanet ["p3", "p4", "p5", "p6", "p7"]
+  GAMBLER_HEAD:
+    BASE_LR: 0.001
 DATASETS:
   TRAIN: ("coco_2017_train_100samples",)
   TEST: ("coco_2017_train_100samples",)
@@ -27,4 +29,4 @@ SOLVER:
   CHECKPOINT_PERIOD: 1500
   WARMUP_FACTOR: 0.00333333
   WARMUP_ITERS: 300
-OUTPUT_DIR: "./output/gambler/simpleretina_sigmoid_normalization"
+OUTPUT_DIR: "./output/gambler/exp1"
