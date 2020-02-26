@@ -580,6 +580,24 @@ class GANTrainer(TrainerBase):
             return evaluator_list[0]
         return DatasetEvaluators(evaluator_list)
 
+    def resume_or_load(self, resume=True):
+        """
+        If `resume==True`, and last checkpoint exists, resume from it.
+
+        Otherwise, load a model specified by the config.
+
+        Args:
+            resume (bool): whether to do resume or not
+        """
+        # The checkpoint stores the training iteration that just finished, thus we start
+        # at the next iteration (or iter zero if there's no checkpoint).
+        self.start_iter = (
+            self.detection_checkpointer.resume_or_load(self.cfg.MODEL.WEIGHTS, resume=resume).get(
+                "iteration", -1
+            )
+            + 1
+        )
+
     def visualize_training(self, gt_classes, y, betting_map, input_images):
 
         [n, c, w, h] = y.shape
@@ -588,6 +606,7 @@ class GANTrainer(TrainerBase):
         gt_grid = make_grid(gt/80., nrow=2)
         # save_image(gt/80., os.path.join(global_cfg.OUTPUT_DIR, "", "gt.jpg"), nrow=2)
 
+        '''
         a = gt>=0
         b = gt<80
         c = a * b
@@ -595,6 +614,7 @@ class GANTrainer(TrainerBase):
         gt[gt==-1] = 0
         gt[gt==80] = 1
         save_image(gt / 1., os.path.join(global_cfg.OUTPUT_DIR, str(self.iter) + "iter_gt.jpg"), nrow=2)
+        '''
 
         storage = get_event_storage()
         device = torch.device(global_cfg.MODEL.DEVICE)
@@ -882,8 +902,7 @@ def main(args):
     #     return res
 
     trainer = GANTrainer(cfg)
-    # todo resume function maybe for the pretrained models we need it
-    # trainer.resume_or_load(resume=args.resume)
+    trainer.resume_or_load(resume=args.resume)
     return trainer.train()
 
 
