@@ -14,7 +14,7 @@ def add_gambler_config(cfg):
     # number of iterations the gambler is trained before the detector is trained
     _C.MODEL.GAMBLER_HEAD.GAMBLER_ITERATIONS = 20
     # number of iterations the detector is trained before the gambler is trained
-    _C.MODEL.GAMBLER_HEAD.DETECTOR_ITERATIONS = 120
+    _C.MODEL.GAMBLER_HEAD.DETECTOR_ITERATIONS = 40
     # VARIANTS: C(per class prediction) R(per region prediction) CR(both)
     _C.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT = "C"
     # Number of input channels to the gambler module (num_classes + 3 (input channel RGB))
@@ -22,9 +22,11 @@ def add_gambler_config(cfg):
     # Number of output channels of the gambler module (desired betting map channels)
     _C.MODEL.GAMBLER_HEAD.GAMBLER_OUT_CHANNELS = 1
     # Hyperparameter lambda that multiplies the gambler loss
-    _C.MODEL.GAMBLER_HEAD.GAMBLER_LAMBDA = 1000
+    _C.MODEL.GAMBLER_HEAD.GAMBLER_LAMBDA = 200
     # Hyperparameter lambda that multiplies the regression loss
     _C.MODEL.GAMBLER_HEAD.REGRESSION_LAMBDA = 1
+    # Hyperparameter lambda that multiplies the gambler loss from outside
+    _C.MODEL.GAMBLER_HEAD.GAMBLER_OUTSIDE_LAMBDA = 1
     _C.MODEL.GAMBLER_HEAD.GAMBLER_TEMPERATURE = 0.02
     # The period (in terms of steps) for minibatch visualization at train time.
     # Set to 0 to disable.

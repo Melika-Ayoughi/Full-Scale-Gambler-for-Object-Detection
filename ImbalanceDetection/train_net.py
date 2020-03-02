@@ -180,6 +180,7 @@ class GANTrainer(TrainerBase):
         self.register_hooks(gamb_hooks)
         self.gambler_loss_lambda = cfg.MODEL.GAMBLER_HEAD.GAMBLER_LAMBDA
         self.regression_loss_lambda = cfg.MODEL.GAMBLER_HEAD.REGRESSION_LAMBDA
+        self.gambler_outside_lambda = cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTSIDE_LAMBDA
         self.vis_period = cfg.MODEL.GAMBLER_HEAD.VIS_PERIOD
 
     @classmethod
@@ -422,8 +423,8 @@ class GANTrainer(TrainerBase):
                 k: np.mean([x[k] for x in all_metrics_dict]) for k in all_metrics_dict[0].keys()
             }
             if "loss_gambler" in all_metrics_dict[0]:
-                total_losses_reduced = metrics_dict["loss_box_reg"] + metrics_dict["loss_cls"] - metrics_dict["loss_gambler"]
-                self.storage.put_scalar("loss_detector", total_losses_reduced)
+                # total_losses_reduced = metrics_dict["loss_box_reg"] + metrics_dict["loss_cls"] - self.gambler_outside_lambda * metrics_dict["loss_gambler"]
+                self.storage.put_scalar("loss_detector", metrics_dict["loss_detector"])
             else:
                 total_losses_reduced = sum(loss for loss in metrics_dict.values())
                 self.storage.put_scalar("total_loss", total_losses_reduced)
@@ -808,7 +809,8 @@ class GANTrainer(TrainerBase):
             loss_gambler = loss_gambler * self.gambler_loss_lambda
             loss_dict.update({"loss_gambler": loss_gambler})
             loss_dict.update({"loss_before_weighting": loss_before_weighting})
-            loss_detector = loss_dict["loss_box_reg"] + loss_dict["loss_cls"] - loss_dict["loss_gambler"]
+            loss_detector = loss_dict["loss_box_reg"] + loss_dict["loss_cls"] - self.gambler_outside_lambda * loss_dict["loss_gambler"]
+            loss_dict.update({"loss_detector": loss_detector})
             self._detect_anomaly(loss_detector, loss_dict)
             self._detect_anomaly(loss_gambler, loss_dict)
             metrics_dict = loss_dict
@@ -846,8 +848,8 @@ class GANTrainer(TrainerBase):
             loss_gambler = loss_gambler * self.gambler_loss_lambda
             loss_dict.update({"loss_gambler": loss_gambler})
             loss_dict.update({"loss_before_weighting": loss_before_weighting})
-            loss_detector = loss_dict["loss_box_reg"] + loss_dict["loss_cls"] - loss_dict["loss_gambler"]
-
+            loss_detector = loss_dict["loss_box_reg"] + loss_dict["loss_cls"] - self.gambler_outside_lambda * loss_dict["loss_gambler"]
+            loss_dict.update({"loss_detector": loss_detector})
             self._detect_anomaly(loss_detector, loss_dict)
             self._detect_anomaly(loss_gambler, loss_dict)
             metrics_dict = loss_dict
