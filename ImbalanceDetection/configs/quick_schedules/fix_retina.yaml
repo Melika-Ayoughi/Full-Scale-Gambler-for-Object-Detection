@@ -1,9 +1,7 @@
 _BASE_: "./simple_retinanet.yaml"
 MODEL:
-  WEIGHTS: "./output/retinanet_baselines/simple_retina_overfit/1gpu_scale64_p4_lr2/model_final.pth"
-  GAMBLER_HEAD:
-    BASE_LR: 0.001
-SOLVER:
-  BASE_LR: 0.0001
-#  WEIGHT_DECAY: 0.0005
-OUTPUT_DIR: "./output/gambler/lr/lr_instead_of_budget"
+  WEIGHTS: "./output/retinanet_baselines/simple_retina_overfit/1gpu_scale64_p4_lr2/model_final.pth" #todo change to all scales all aspect ratios
+  ANCHOR_GENERATOR:
+    SIZES: !!python/object/apply:eval ["[[x, x * 2**(1.0/3), x * 2**(2.0/3) ] for x in [32, 64, 128, 256, 512 ]]"] #multiple scales
+    ASPECT_RATIOS: [[1.0]]  # 1 aspect ratio
+OUTPUT_DIR: "./output/gambler/debug"

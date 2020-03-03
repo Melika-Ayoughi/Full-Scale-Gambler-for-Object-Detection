@@ -14,9 +14,9 @@ MODEL:
     IN_FEATURES: ["p4"] # 1 feature map layer - p3 is stride 8 - original retinanet ["p3", "p4", "p5", "p6", "p7"]
   GAMBLER_HEAD:
     BASE_LR: 0.001
-#DATASETS:
-#  TRAIN: ("coco_2017_train_100samples",)
-#  TEST: ("coco_2017_train_100samples",)
+DATASETS:
+  TRAIN: ("coco_2017_train_100samples",)
+  TEST: ("coco_2017_train_100samples",)
 #TEST:
 #  DETECTIONS_PER_IMAGE: 300  # LVIS allows up to 300
 TEST:
