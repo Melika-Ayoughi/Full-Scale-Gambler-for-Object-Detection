@@ -1,6 +1,6 @@
 _BASE_: "./simple_retinanet.yaml"
 MODEL:
-  WEIGHTS: "./output/retinanet_baselines/simple_retina_overfit/1gpu_scale64_p4_lr2/model_final.pth" #todo change to all scales all aspect ratios
+  WEIGHTS: "./output/retinanet_baselines/simple_retina_overfit/p4_3scales/model_final.pth" #todo change to all scales all aspect ratios
   ANCHOR_GENERATOR:
     SIZES: !!python/object/apply:eval ["[[x, x * 2**(1.0/3), x * 2**(2.0/3) ] for x in [64]]"] #multiple scales
     ASPECT_RATIOS: [[1.0]]  # 1 aspect ratio

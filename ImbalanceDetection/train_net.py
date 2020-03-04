@@ -904,7 +904,7 @@ def main(args):
     #     return res
 
     trainer = GANTrainer(cfg)
-    trainer.resume_or_load(resume=args.resume)
+    # trainer.resume_or_load(resume=args.resume)
     return trainer.train()
 
 
