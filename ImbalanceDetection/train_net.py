@@ -600,24 +600,43 @@ class GANTrainer(TrainerBase):
         )
 
     def visualize_training(self, gt_classes, y, betting_map, input_images):
+        storage = get_event_storage()
 
         [n, c, w, h] = y.shape
-        gt = gt_classes.reshape(n, w, h, c)
-        gt = gt.permute(0, 3, 1, 2)
-        gt_grid = make_grid(gt/80., nrow=2)
+        a = torch.ones(gt_classes.shape) * 0.5  # gray foreground by default
+        a[gt_classes == -1] = 1  # white unmatched
+        a[gt_classes == 80] = 0  # black background
+        gt_classes = a
+
+        gt = gt_classes.reshape(n, -1, w, h, c) #(n,anchors,w,h,c)
+        gt_scale1 = gt[:, 0, :, :, :]
+        gt_scale2 = gt[:, 1, :, :, :]
+        gt_scale3 = gt[:, 2, :, :, :]
+        gt_scale1 = gt_scale1.permute(0, 3, 1, 2)
+        gt_scale2 = gt_scale2.permute(0, 3, 1, 2)
+        gt_scale3 = gt_scale3.permute(0, 3, 1, 2)
+        gt_grid_1 = make_grid(gt_scale1, nrow=2)
+        gt_grid_2 = make_grid(gt_scale2, nrow=2)
+        gt_grid_3 = make_grid(gt_scale3, nrow=2)
+        gt_scales = torch.cat((gt_grid_1, gt_grid_2, gt_grid_3), dim=1)
+        storage.put_image("groundtruth scales", gt_scales)
+
+        # gt = gt.permute(0, 3, 1, 2)
+        # gt_grid = make_grid(gt/80., nrow=2)
         # save_image(gt/80., os.path.join(global_cfg.OUTPUT_DIR, "", "gt.jpg"), nrow=2)
 
-        '''
-        a = gt>=0
+
+        '''a = gt>=0
         b = gt<80
         c = a * b
         gt[c] = 0.5
         gt[gt==-1] = 0
         gt[gt==80] = 1
-        save_image(gt / 1., os.path.join(global_cfg.OUTPUT_DIR, str(self.iter) + "iter_gt.jpg"), nrow=2)
+        gt_grid = make_grid(gt / 1., nrow=2)
+        # save_image(gt / 1., os.path.join(global_cfg.OUTPUT_DIR, str(self.iter) + "iter_gt.jpg"), nrow=2)
         '''
 
-        storage = get_event_storage()
+
         device = torch.device(global_cfg.MODEL.DEVICE)
 
         pixel_mean = torch.Tensor(global_cfg.MODEL.PIXEL_MEAN).to(device).view(3, 1, 1)
@@ -631,7 +650,7 @@ class GANTrainer(TrainerBase):
         # save_image(input_images/255., global_cfg.OUTPUT_DIR + "/test.jpg", nrow=2)
         betting_map_grid = make_grid(betting_map, nrow=2)
         loss_grid = make_grid(y, nrow=2)
-        all = torch.cat((gt_grid, loss_grid, betting_map_grid, input_grid), dim=1)
+        all = torch.cat((betting_map_grid, input_grid), dim=1)
         storage.put_image("input_betting_map", all)
 
     def softmax_ce_gambler_loss(self, predictions, betting_map, gt_classes):
@@ -661,6 +680,8 @@ class GANTrainer(TrainerBase):
         # prepare weights
         weights = permute_all_weights_to_N_HWA_K_and_concat([weights], 1, normalize_w)
 
+        # 1 weight for all scales of an anchor
+        weights = weights.repeat_interleave(3, dim=0)  #todo hardcoded 3: scales
         [N, C] = weights.shape
         # class-agnostic weights
         if C == 1:
