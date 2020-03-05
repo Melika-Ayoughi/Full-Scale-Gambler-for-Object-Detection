@@ -85,7 +85,7 @@ def permute_all_weights_to_N_HWA_K_and_concat(weights, num_classes=80, normalize
     weights_flattened = [permute_to_N_HWA_K(w, num_classes) for w in weights] # Size=(N,HWA,K)
     weights_flattened = [w + global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_TEMPERATURE for w in weights_flattened]
     if normalize_w is True:
-        weights_flattened = [w / torch.sum(w, dim=[1, 2], keepdim=True) for w in weights_flattened]
+        weights_flattened = [w / torch.sum(w, dim=[1, 2], keepdim=True) for w in weights_flattened] #normalize by wxh only for now #todo experiment with normalizing across anchors -> distribute bets among scales maybe some are more important
     # concatenate on the first dimension (representing the feature levels), to
     # take into account the way the labels were generated (with all feature maps
     # being concatenated as well)
@@ -182,6 +182,7 @@ class GANTrainer(TrainerBase):
         self.regression_loss_lambda = cfg.MODEL.GAMBLER_HEAD.REGRESSION_LAMBDA
         self.gambler_outside_lambda = cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTSIDE_LAMBDA
         self.vis_period = cfg.MODEL.GAMBLER_HEAD.VIS_PERIOD
+        self.device = self.cfg.MODEL.DEVICE
 
     @classmethod
     def build_optimizer_gambler(self, cfg, gambler_model) -> torch.optim.Optimizer:
@@ -603,13 +604,13 @@ class GANTrainer(TrainerBase):
         storage = get_event_storage()
         device = torch.device(global_cfg.MODEL.DEVICE)
 
-        [n, c, w, h] = y.shape
+        [n, _, w, h] = y.shape
         a = torch.ones(gt_classes.shape) * 0.5  # gray foreground by default
         a[gt_classes == -1] = 1  # white unmatched
         a[gt_classes == 80] = 0  # black background
         gt_classes = a.to(device)
 
-        gt = gt_classes.reshape(n, w, h, -1, c) #(n,anchors,w,h,c)
+        gt = gt_classes.reshape(n, w, h, -1, 1) #(n, w, h, anchors, c)
 
         gt_scale1 = gt[:, :, :, 0, :]
         gt_scale2 = gt[:, :, :, 1, :]
@@ -617,9 +618,9 @@ class GANTrainer(TrainerBase):
         gt_scale1 = gt_scale1.permute(0, 3, 1, 2)
         gt_scale2 = gt_scale2.permute(0, 3, 1, 2)
         gt_scale3 = gt_scale3.permute(0, 3, 1, 2)
-        gt_grid_1 = make_grid(gt_scale1, nrow=2)
-        gt_grid_2 = make_grid(gt_scale2, nrow=2)
-        gt_grid_3 = make_grid(gt_scale3, nrow=2)
+        gt_grid_1 = make_grid(gt_scale1, nrow=2, pad_value=1)
+        gt_grid_2 = make_grid(gt_scale2, nrow=2, pad_value=1)
+        gt_grid_3 = make_grid(gt_scale3, nrow=2, pad_value=1)
         gt_scales = torch.cat((gt_grid_1, gt_grid_2, gt_grid_3), dim=1)
         # storage.put_image("groundtruth scales", gt_scales)
 
@@ -638,7 +639,11 @@ class GANTrainer(TrainerBase):
         input_grid = make_grid(input_images/255., nrow=2)
         # print("debug_debug_melika" , torch.max(input_images))
         # save_image(input_images/255., global_cfg.OUTPUT_DIR + "/test.jpg", nrow=2)
-        betting_map_grid = make_grid(betting_map, nrow=2)
+        [bm1, bm2, bm3] = torch.chunk(betting_map, 3,dim=1) #todo hard coded scales
+        bm1 = make_grid(bm1, nrow=2)
+        bm2 = make_grid(bm2, nrow=2)
+        bm3 = make_grid(bm3, nrow=2)
+        betting_map_grid = torch.cat((bm1,bm2,bm3), dim=1)
         loss_grid = make_grid(y, nrow=2)  # todo loss_grid range
         all = torch.cat((gt_scales, input_grid, loss_grid, betting_map_grid), dim=1)
         storage.put_image("input_betting_map", all)
@@ -662,20 +667,30 @@ class GANTrainer(TrainerBase):
 
     def sigmoid_gambler_loss(self, pred_class_logits, weights, gt_classes, normalize_w=False, detach_pred=False):
 
-        [n,c,w,h] = pred_class_logits[0].shape
+        [n,ca,w,h] = pred_class_logits[0].shape
         if detach_pred is True:
             pred_class_logits = [p.detach() for p in pred_class_logits]
 
         num_classes = global_cfg.MODEL.RETINANET.NUM_CLASSES
         # prepare weights
-        weights = permute_all_weights_to_N_HWA_K_and_concat([weights], 1, normalize_w)
+        weights = permute_all_weights_to_N_HWA_K_and_concat([weights], 1, normalize_w) #todo hardcoded 3: scales
 
+        #todo add if for different output formats
         # 1 weight for all scales of an anchor
-        weights = weights.repeat_interleave(3, dim=0)  #todo hardcoded 3: scales
-        [N, C] = weights.shape
-        # class-agnostic weights
-        if C == 1:
+        # per location weights (neither per class nor per anchor)
+        if global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_INPUT == "BCHW" and global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "B1HW":
+            [N, C] = weights.shape #C==1
             weights = weights.expand(N, num_classes)
+        # aggregated anchor weights
+        elif global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_INPUT == "BCAHW" and global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "B1HW":
+            weights = weights.repeat_interleave(3, dim=0)  # todo hardcoded 3: scales
+            [N, C] = weights.shape #C==1
+            weights = weights.expand(N, num_classes)
+        # per anchor weights, aggregated class weights
+        elif global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_INPUT == "BCAHW" and global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "BAHW":
+            [N, C] = weights.shape  # C==1
+            weights = weights.expand(N, num_classes)
+
 
         pred_class_logits = permute_all_cls_to_N_HWA_K_and_concat(
             pred_class_logits, num_classes
@@ -699,12 +714,13 @@ class GANTrainer(TrainerBase):
             gamma=self.cfg.MODEL.RETINANET.FOCAL_LOSS_GAMMA,
             reduction="sum")
         loss_cls = loss_cls / max(1, num_foreground)
-        device = self.cfg.MODEL.DEVICE
-        y = -25 * torch.ones((list(valid_idxs.shape)[0], 80)).to(device)
+
+        y = torch.ones((list(valid_idxs.shape)[0], 80)).to(self.device)
         y[valid_idxs, :] = loss_before_weighting.clone().detach()
-        y = y.reshape(n, w, h, c)
-        y = y.permute(0, 3, 1, 2)
-        y = y.sum(dim=1, keepdim=True)
+        y = y.reshape(n, w, h, num_classes, -1) #(n,w,h,c,a)
+        y = y.permute(0, 3, 4, 1, 2)
+        y = y.sum(dim=[1, 2], keepdim=True) # aggregate the loss over classes and anchor scales
+        y = y.reshape(n, -1, w, h)
         loss_before_weighting = loss_before_weighting.sum()
         loss_before_weighting = loss_before_weighting / max(1, num_foreground)
         return y, loss_before_weighting, loss_cls

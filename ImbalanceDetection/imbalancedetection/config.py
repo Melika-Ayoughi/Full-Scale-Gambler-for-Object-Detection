@@ -15,12 +15,14 @@ def add_gambler_config(cfg):
     _C.MODEL.GAMBLER_HEAD.GAMBLER_ITERATIONS = 20
     # number of iterations the detector is trained before the gambler is trained
     _C.MODEL.GAMBLER_HEAD.DETECTOR_ITERATIONS = 0
-    # VARIANTS: C(per class prediction) R(per region prediction) CR(both)
-    _C.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT = "C"
+    # VARIANTS: BCHW(input to gambler is (B, C, H, W)), BCAHW (input to gambler is (B, CxA, H, W))
+    _C.MODEL.GAMBLER_HEAD.GAMBLER_INPUT = "BCAHW"
+    # VARIANTS: B1HW BCHW BAHW BCAHW
+    _C.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT = "BAHW"
     # Number of input channels to the gambler module (num_classes + 3 (input channel RGB))
     _C.MODEL.GAMBLER_HEAD.GAMBLER_IN_CHANNELS = 243  # 3(scales) x 80(classes) + 3(RGB)
     # Number of output channels of the gambler module (desired betting map channels)
-    _C.MODEL.GAMBLER_HEAD.GAMBLER_OUT_CHANNELS = 1
+    _C.MODEL.GAMBLER_HEAD.GAMBLER_OUT_CHANNELS = 3
     # Hyperparameter lambda that multiplies the gambler loss
     _C.MODEL.GAMBLER_HEAD.GAMBLER_LAMBDA = 200
     # Hyperparameter lambda that multiplies the regression loss
