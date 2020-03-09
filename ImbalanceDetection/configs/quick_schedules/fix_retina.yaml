@@ -10,4 +10,4 @@ SOLVER:
   STEPS: (30000, 40000)
   MAX_ITER: 45000
   CHECKPOINT_PERIOD: 2250
-OUTPUT_DIR: "./output/gambler/11scales_11weights"
+OUTPUT_DIR: "./output/gambler/11scales_1weight"

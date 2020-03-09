@@ -612,7 +612,8 @@ class GANTrainer(TrainerBase):
 
         gt = gt_classes.reshape(n, w, h, -1, 1) #(n, w, h, anchors, c)
 
-        gt = torch.chunk(gt, global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUT_CHANNELS, dim=3)  # todo hard coded scales
+        anchor_scales = global_cfg.MODEL.ANCHOR_GENERATOR.SIZES
+        gt = torch.chunk(gt, len(anchor_scales[0]), dim=3)  # todo hard coded scales #todo [0] is wrong
         gt_list = []
         for _gt in gt:
             _gt = _gt.squeeze(dim=3)
@@ -676,7 +677,8 @@ class GANTrainer(TrainerBase):
             weights = weights.expand(N, num_classes)
         # aggregated anchor weights
         elif global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_INPUT == "BCAHW" and global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "B1HW":
-            weights = weights.repeat_interleave(3, dim=0)  # todo hardcoded 3: scales
+            anchor_scales = global_cfg.MODEL.ANCHOR_GENERATOR.SIZES
+            weights = weights.repeat_interleave(len(anchor_scales[0]), dim=0)  # todo hardcoded 3: scales [0] is wrong
             [N, C] = weights.shape #C==1
             weights = weights.expand(N, num_classes)
         # per anchor weights, aggregated class weights
