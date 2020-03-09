@@ -20,9 +20,9 @@ def add_gambler_config(cfg):
     # VARIANTS: B1HW BCHW BAHW BCAHW
     _C.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT = "BAHW"
     # Number of input channels to the gambler module (num_classes + 3 (input channel RGB))
-    _C.MODEL.GAMBLER_HEAD.GAMBLER_IN_CHANNELS = 243  # 3(scales) x 80(classes) + 3(RGB)
+    _C.MODEL.GAMBLER_HEAD.GAMBLER_IN_CHANNELS = 883  # 3(scales) x 80(classes) + 3(RGB)
     # Number of output channels of the gambler module (desired betting map channels)
-    _C.MODEL.GAMBLER_HEAD.GAMBLER_OUT_CHANNELS = 3
+    _C.MODEL.GAMBLER_HEAD.GAMBLER_OUT_CHANNELS = 11
     # Hyperparameter lambda that multiplies the gambler loss
     _C.MODEL.GAMBLER_HEAD.GAMBLER_LAMBDA = 200
     # Hyperparameter lambda that multiplies the regression loss

@@ -612,21 +612,13 @@ class GANTrainer(TrainerBase):
 
         gt = gt_classes.reshape(n, w, h, -1, 1) #(n, w, h, anchors, c)
 
-        gt_scale1 = gt[:, :, :, 0, :]
-        gt_scale2 = gt[:, :, :, 1, :]
-        gt_scale3 = gt[:, :, :, 2, :]
-        gt_scale1 = gt_scale1.permute(0, 3, 1, 2)
-        gt_scale2 = gt_scale2.permute(0, 3, 1, 2)
-        gt_scale3 = gt_scale3.permute(0, 3, 1, 2)
-        gt_grid_1 = make_grid(gt_scale1, nrow=2, pad_value=1)
-        gt_grid_2 = make_grid(gt_scale2, nrow=2, pad_value=1)
-        gt_grid_3 = make_grid(gt_scale3, nrow=2, pad_value=1)
-        gt_scales = torch.cat((gt_grid_1, gt_grid_2, gt_grid_3), dim=1)
-        # storage.put_image("groundtruth scales", gt_scales)
-
-        # gt = gt.permute(0, 3, 1, 2)
-        # gt_grid = make_grid(gt/80., nrow=2)
-        # save_image(gt/80., os.path.join(global_cfg.OUTPUT_DIR, "", "gt.jpg"), nrow=2)
+        gt = torch.chunk(gt, global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUT_CHANNELS, dim=3)  # todo hard coded scales
+        gt_list = []
+        for _gt in gt:
+            _gt = _gt.squeeze(dim=3)
+            _gt = _gt.permute(0, 3, 1, 2)
+            gt_list.append(make_grid(_gt, nrow=2, pad_value=1))
+        gt_scales = torch.cat(gt_list, dim=1)
 
         # save_image(gt / 1., os.path.join(global_cfg.OUTPUT_DIR, str(self.iter) + "iter_gt.jpg"), nrow=2)
 
@@ -639,14 +631,15 @@ class GANTrainer(TrainerBase):
         input_grid = make_grid(input_images/255., nrow=2)
         # print("debug_debug_melika" , torch.max(input_images))
         # save_image(input_images/255., global_cfg.OUTPUT_DIR + "/test.jpg", nrow=2)
-        [bm1, bm2, bm3] = torch.chunk(betting_map, 3,dim=1) #todo hard coded scales
-        bm1 = make_grid(bm1, nrow=2)
-        bm2 = make_grid(bm2, nrow=2)
-        bm3 = make_grid(bm3, nrow=2)
-        betting_map_grid = torch.cat((bm1,bm2,bm3), dim=1)
+        bm = torch.chunk(betting_map, global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUT_CHANNELS, dim=1) #todo hard coded scales
+        bm_list = []
+        for _bm in bm:
+            bm_list.append(make_grid(_bm, nrow=2))
+        betting_map_grid = torch.cat(bm_list, dim=1)
         loss_grid = make_grid(y, nrow=2)  # todo loss_grid range
-        all = torch.cat((gt_scales, input_grid, loss_grid, betting_map_grid), dim=1)
-        storage.put_image("input_betting_map", all)
+        storage.put_image("gt_bettingmap", torch.cat((gt_scales, betting_map_grid), dim=1))
+        all = torch.cat((input_grid, loss_grid), dim=1)
+        storage.put_image("input_loss", all)
 
     def softmax_ce_gambler_loss(self, predictions, betting_map, gt_classes):
 
