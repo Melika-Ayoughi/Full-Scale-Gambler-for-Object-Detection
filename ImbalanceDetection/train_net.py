@@ -85,7 +85,7 @@ def permute_all_weights_to_N_HWA_K_and_concat(weights, num_classes=80, normalize
     weights_flattened = [permute_to_N_HWA_K(w, num_classes) for w in weights] # Size=(N,HWA,K)
     weights_flattened = [w + global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_TEMPERATURE for w in weights_flattened]
     if normalize_w is True:
-        weights_flattened = [w / torch.sum(w, dim=[1, 2], keepdim=True) for w in weights_flattened] #normalize by wxh only for now #todo experiment with normalizing across anchors -> distribute bets among scales maybe some are more important
+        weights_flattened = [w / torch.sum(w, dim=[1], keepdim=True) for w in weights_flattened] #normalize by wxh only for now #todo experiment with normalizing across anchors -> distribute bets among scales maybe some are more important
     # concatenate on the first dimension (representing the feature levels), to
     # take into account the way the labels were generated (with all feature maps
     # being concatenated as well)
@@ -106,7 +106,7 @@ class GANTrainer(TrainerBase):
         self.gambler_model = build_gambler(cfg).train()
         self.detection_model = build_detector(cfg).train()
 
-        DetectionCheckpointer(self.detection_model, save_dir=cfg.OUTPUT_DIR).resume_or_load(cfg.MODEL.WEIGHTS, resume=True)
+        # DetectionCheckpointer(self.detection_model, save_dir=cfg.OUTPUT_DIR).resume_or_load(cfg.MODEL.WEIGHTS, resume=True)
 
 
         self.gambler_optimizer = self.build_optimizer_gambler(cfg, self.gambler_model)
@@ -119,9 +119,9 @@ class GANTrainer(TrainerBase):
             self.gambler_model = DistributedDataParallel(
                 self.gambler_model, device_ids=[comm.get_local_rank()], broadcast_buffers=False
             )
-            # self.detection_model = DistributedDataParallel(
-            #     self.detection_model, device_ids=[comm.get_local_rank()], broadcast_buffers=False, find_unused_parameters=True,
-            # )
+            self.detection_model = DistributedDataParallel(
+                self.detection_model, device_ids=[comm.get_local_rank()], broadcast_buffers=False, find_unused_parameters=True,
+            )
 
         self.data_loader = data_loader
         self._data_loader_iter = iter(data_loader)
@@ -926,7 +926,7 @@ def main(args):
     #     return res
 
     trainer = GANTrainer(cfg)
-    # trainer.resume_or_load(resume=args.resume)
+    trainer.resume_or_load(resume=args.resume)
     return trainer.train()
 
 

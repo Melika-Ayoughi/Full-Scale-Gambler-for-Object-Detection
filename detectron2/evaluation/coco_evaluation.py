@@ -284,7 +284,7 @@ class COCOEvaluator(DatasetEvaluator):
         storage = get_event_storage()
         storage.put_fig("AP", fig)
         fig.savefig(os.path.join(global_cfg.OUTPUT_DIR, "AP_"+str(storage.iter)+".pdf"))
-
+        plt.close('all')
 
         # tabulate it
         N_COLS = min(6, len(results_per_category) * 2)
