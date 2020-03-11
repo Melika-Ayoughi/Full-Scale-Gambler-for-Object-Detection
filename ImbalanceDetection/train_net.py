@@ -36,6 +36,9 @@ from collections import OrderedDict
 from detectron2.utils.events import CommonMetricPrinter, JSONWriter, TensorboardXWriter
 from detectron2.utils.events import get_event_storage
 from torchvision.utils import make_grid, save_image
+from PIL import Image
+import torchvision.transforms.functional as TF
+import matplotlib.pyplot as plt
 
 
 def permute_to_N_HWA_K(tensor, K):
@@ -603,8 +606,15 @@ class GANTrainer(TrainerBase):
     def visualize_training(self, gt_classes, y, betting_map, input_images):
         storage = get_event_storage()
         device = torch.device(global_cfg.MODEL.DEVICE)
+        anchor_scales = global_cfg.MODEL.ANCHOR_GENERATOR.SIZES
 
         [n, _, w, h] = y.shape
+        y = torch.chunk(y, len(anchor_scales[0]), dim=1)  # todo hard coded scales #todo [0] is wrong
+        y_list = []
+        for _y in y:
+            y_list.append(make_grid(_y, nrow=2, pad_value=1))
+        loss_grid = torch.cat(y_list, dim=1)
+
         a = torch.ones(gt_classes.shape) * 0.5  # gray foreground by default
         a[gt_classes == -1] = 1  # white unmatched
         a[gt_classes == 80] = 0  # black background
@@ -612,7 +622,6 @@ class GANTrainer(TrainerBase):
 
         gt = gt_classes.reshape(n, w, h, -1, 1) #(n, w, h, anchors, c)
 
-        anchor_scales = global_cfg.MODEL.ANCHOR_GENERATOR.SIZES
         gt = torch.chunk(gt, len(anchor_scales[0]), dim=3)  # todo hard coded scales #todo [0] is wrong
         gt_list = []
         for _gt in gt:
@@ -626,21 +635,42 @@ class GANTrainer(TrainerBase):
         pixel_mean = torch.Tensor(global_cfg.MODEL.PIXEL_MEAN).to(device).view(3, 1, 1)
         pixel_std = torch.Tensor(global_cfg.MODEL.PIXEL_STD).to(device).view(3, 1, 1)
         denormalizer = lambda x: (x * pixel_std) + pixel_mean
-        # print("debug_debug_melika_@@@@@@@@@@@@@@@", torch.max(input_images))
         input_images = denormalizer(input_images)
 
         input_grid = make_grid(input_images/255., nrow=2)
-        # print("debug_debug_melika" , torch.max(input_images))
         # save_image(input_images/255., global_cfg.OUTPUT_DIR + "/test.jpg", nrow=2)
         bm = torch.chunk(betting_map, global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUT_CHANNELS, dim=1) #todo hard coded scales
         bm_list = []
+
+        # heatmap = torch.empty(1, 252, 271).uniform_(0, 1)
+        # heatmap = torch.cat((heatmap, torch.zeros(2, 252, 271)))
+        #
+        # import torchvision.transforms.functional as TF
+        # img = TF.to_pil_image(x)  # assuming your image in x
+        # h_img = TF.to_pil_image(heatmap)
+        #
+        # res = Image.blend(img, h_img, 0.5)
+
         for _bm in bm:
+            # Create heatmap image in red channel
+            g_channel = torch.zeros_like(_bm)
+            b_channel = torch.zeros_like(_bm)
+            _bm = torch.cat((_bm, g_channel, b_channel), dim=1)
             bm_list.append(make_grid(_bm, nrow=2))
         betting_map_grid = torch.cat(bm_list, dim=1)
-        loss_grid = make_grid(y, nrow=2)  # todo loss_grid range
+
+        # blended = betting_map_grid*0.5 + input_grid*0.5
+        # storage.put_image("blended", blended)
+        cm = plt.get_cmap('jet')
+        betting_map_grid_heatmap = cm(betting_map_grid[0, :, :].detach().cpu())
+        blended = betting_map_grid_heatmap.transpose(2, 0, 1)[:3, :, :] * 0.5 + input_grid.cpu().numpy() * 0.5
+        storage.put_image("blended", blended)
+
+        # loss_grid = make_grid(y, nrow=2)  # todo loss_grid range
         storage.put_image("gt_bettingmap", torch.cat((gt_scales, betting_map_grid), dim=1))
-        all = torch.cat((input_grid, loss_grid), dim=1)
-        storage.put_image("input_loss", all)
+        # all = torch.cat((input_grid, loss_grid), dim=1)
+        storage.put_image("loss", loss_grid)
+        storage.put_image("input", input_grid)
 
     def softmax_ce_gambler_loss(self, predictions, betting_map, gt_classes):
 
@@ -704,7 +734,7 @@ class GANTrainer(TrainerBase):
             pred_class_logits[valid_idxs],
             gt_classes_target[valid_idxs],
             weights[valid_idxs],  # -1 labels are ignored for calculating the loss
-            mode='none',
+            mode=self.cfg.MODEL.GAMBLER_HEAD.GAMBLER_LOSS_MODE,
             alpha=self.cfg.MODEL.RETINANET.FOCAL_LOSS_ALPHA,
             gamma=self.cfg.MODEL.RETINANET.FOCAL_LOSS_GAMMA,
             reduction="sum")
@@ -714,8 +744,8 @@ class GANTrainer(TrainerBase):
         y[valid_idxs, :] = loss_before_weighting.clone().detach()
         y = y.reshape(n, w, h, num_classes, -1) #(n,w,h,c,a)
         y = y.permute(0, 3, 4, 1, 2)
-        y = y.sum(dim=[1, 2], keepdim=True) # aggregate the loss over classes and anchor scales
-        y = y.reshape(n, -1, w, h)
+        y = y.sum(dim=[1], keepdim=False) # aggregate the loss over classes but not anchor scales
+        # y = y.reshape(n, -1, w, h)
         loss_before_weighting = loss_before_weighting.sum()
         loss_before_weighting = loss_before_weighting / max(1, num_foreground)
         return y, loss_before_weighting, loss_cls
@@ -725,7 +755,7 @@ class GANTrainer(TrainerBase):
             inputs,
             targets,
             weights,
-            mode: 'none',
+            mode: str = "sigmoid",
             alpha: float = -1,
             gamma: float = 2,
             reduction: str = "none",
@@ -764,7 +794,7 @@ class GANTrainer(TrainerBase):
             if alpha >= 0:
                 alpha_t = alpha * targets + (1 - alpha) * (1 - targets)
                 loss = alpha_t * loss
-        elif mode == "none":
+        elif mode == "sigmoid":
             loss = ce_loss
         else:
             logging.error("No mode it selected for the retinanet loss!!")
