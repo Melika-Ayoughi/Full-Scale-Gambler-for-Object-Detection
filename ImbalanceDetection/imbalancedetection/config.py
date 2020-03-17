@@ -11,6 +11,8 @@ def add_gambler_config(cfg):
     _C.MODEL.GAMBLER_HEAD = CN()
     # VARIANTS: SimpleGambler - UnetGambler
     _C.MODEL.GAMBLER_HEAD.NAME = "UnetGambler"
+    # Loading pretrained weights for the gambler from this location
+    _C.MODEL.GAMBLER_HEAD.WEIGHTS = "./output/gambler/focal_plus_gambler/gambler_models/model_0042749.pth"
     # number of iterations the gambler is trained before the detector is trained
     _C.MODEL.GAMBLER_HEAD.GAMBLER_ITERATIONS = 100
     # number of iterations the detector is trained before the gambler is trained
@@ -18,18 +20,18 @@ def add_gambler_config(cfg):
     # VARIANTS: BCHW(input to gambler is (B, C, H, W)), BCAHW (input to gambler is (B, CxA, H, W))
     _C.MODEL.GAMBLER_HEAD.GAMBLER_INPUT = "BCAHW"
     # VARIANTS: B1HW BCHW BAHW BCAHW
-    _C.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT = "B1HW"
+    _C.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT = "BAHW"
     # Number of input channels to the gambler module (num_classes + 3 (input channel RGB))
     _C.MODEL.GAMBLER_HEAD.GAMBLER_IN_CHANNELS = 883  # 3(scales) x 80(classes) + 3(RGB)
     # Number of output channels of the gambler module (desired betting map channels)
-    _C.MODEL.GAMBLER_HEAD.GAMBLER_OUT_CHANNELS = 1
+    _C.MODEL.GAMBLER_HEAD.GAMBLER_OUT_CHANNELS = 11
     # Hyperparameter lambda that multiplies the gambler loss
-    _C.MODEL.GAMBLER_HEAD.GAMBLER_LAMBDA = 200
+    _C.MODEL.GAMBLER_HEAD.GAMBLER_LAMBDA = 2200
     # Hyperparameter lambda that multiplies the regression loss
     _C.MODEL.GAMBLER_HEAD.REGRESSION_LAMBDA = 1
     # Hyperparameter lambda that multiplies the gambler loss from outside
     _C.MODEL.GAMBLER_HEAD.GAMBLER_OUTSIDE_LAMBDA = 1
-    _C.MODEL.GAMBLER_HEAD.GAMBLER_TEMPERATURE = 0.02
+    _C.MODEL.GAMBLER_HEAD.GAMBLER_TEMPERATURE = 0.03
     # classification loss used in the gambler can be either "sigmoid" or "focal"
     _C.MODEL.GAMBLER_HEAD.GAMBLER_LOSS_MODE = "focal"
     # The period (in terms of steps) for minibatch visualization at train time.

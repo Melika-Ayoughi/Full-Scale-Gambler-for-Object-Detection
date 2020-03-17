@@ -7,26 +7,23 @@ MODEL:
     NUM_CLASSES: 80 #1230
 #    SCORE_THRESH_TEST: 0.0001
   ANCHOR_GENERATOR:
-    SIZES: !!python/object/apply:eval ["[[x] for x in [ 64 ]]"] # 1 scale (in the biggest feature map)
+    SIZES: !!python/object/apply:eval ["[[x * 2**(-5.0/6), x * 2**(-4.0/6), x * 2**(-3.0/6), x * 2**(-2.0/6), x * 2**(-1.0/6), x, x * 2**(1.0/6), x * 2**(2.0/6), x * 2**(3.0/6), x * 2**(4.0/6), x * 2**(5.0/6)] for x in [128]]"] #multiple scales
     ASPECT_RATIOS: [[1.0]]  # 1 aspect ratio
   RETINANET:
     NUM_CLASSES: 80
     IN_FEATURES: ["p4"] # 1 feature map layer - p3 is stride 8 - original retinanet ["p3", "p4", "p5", "p6", "p7"]
   GAMBLER_HEAD:
     BASE_LR: 0.001
-#DATASETS:
-#  TRAIN: ("coco_2017_train_100samples",)
-#  TEST: ("coco_2017_train_100samples",)
 #TEST:
 #  DETECTIONS_PER_IMAGE: 300  # LVIS allows up to 300
 TEST:
-    EVAL_PERIOD: 1500
+    EVAL_PERIOD: 2250
 SOLVER:
   IMS_PER_BATCH: 8
   BASE_LR: 0.02
-  STEPS: (20000, 25000)
-  MAX_ITER: 30000
-  CHECKPOINT_PERIOD: 1500
   WARMUP_FACTOR: 0.00333333
   WARMUP_ITERS: 300
-OUTPUT_DIR: "./output/gambler/exp_fullcoco"
+  STEPS: (43000,)
+  MAX_ITER: 45000
+  CHECKPOINT_PERIOD: 2250
+OUTPUT_DIR: "./output/gambler/debug"

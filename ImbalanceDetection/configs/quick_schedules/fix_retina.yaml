@@ -2,12 +2,17 @@ _BASE_: "./simple_retinanet.yaml"
 MODEL:
 #  WEIGHTS: "./output/retinanet_baselines/simple_retinanet/simple_retina_overfit/p4_128_11scales/model_final.pth" #todo change to all scales all aspect ratios
   ANCHOR_GENERATOR:
-    SIZES: !!python/object/apply:eval ["[[x * 2**(-5.0/6), x * 2**(-4.0/6), x * 2**(-3.0/6), x * 2**(-2.0/6), x * 2**(-1.0/6), x, x * 2**(1.0/6), x * 2**(2.0/6), x * 2**(3.0/6), x * 2**(4.0/6), x * 2**(5.0/6)] for x in [128]]"] #multiple scales
     ASPECT_RATIOS: [[1.0]]  # 1 aspect ratio
+#DATASETS:
+#  TRAIN: ("coco_2017_train_100samples",)
+#  TEST: ("coco_2017_train_100samples",)
 TEST:
     EVAL_PERIOD: 2250
 SOLVER:
   STEPS: (43000,)
   MAX_ITER: 45000
   CHECKPOINT_PERIOD: 2250
-OUTPUT_DIR: "./output/gambler/focal_plus_gambler"
+#INPUT:
+#  MIN_SIZE_TRAIN: (640, )
+#  RANDOM_FLIPPING: False
+OUTPUT_DIR: "./output/gambler/debug"

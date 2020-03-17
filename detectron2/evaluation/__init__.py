@@ -1,7 +1,7 @@
 # Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
 from .cityscapes_evaluation import CityscapesEvaluator
 from .coco_evaluation import COCOEvaluator
-from .evaluator import DatasetEvaluator, DatasetEvaluators, inference_context, inference_on_dataset
+from .evaluator import DatasetEvaluator, DatasetEvaluators, inference_context, inference_on_dataset, inference_and_visualize
 from .lvis_evaluation import LVISEvaluator
 from .panoptic_evaluation import COCOPanopticEvaluator
 from .pascal_voc_evaluation import PascalVOCDetectionEvaluator

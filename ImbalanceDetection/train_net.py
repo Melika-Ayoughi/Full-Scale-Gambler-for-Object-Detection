@@ -28,6 +28,7 @@ from detectron2.evaluation.evaluator import DatasetEvaluator, DatasetEvaluators
 from detectron2.evaluation import (
     DatasetEvaluator,
     inference_on_dataset,
+    inference_and_visualize,
     print_csv_format,
     verify_results,
 )
@@ -94,6 +95,82 @@ def permute_all_weights_to_N_HWA_K_and_concat(weights, num_classes=80, normalize
     # being concatenated as well)
     weights_flattened = cat(weights_flattened, dim=1).reshape(-1, num_classes)
     return weights_flattened
+
+
+def visualize_training(gt_classes, y, betting_map, input_images):
+    storage = get_event_storage()
+    device = torch.device(global_cfg.MODEL.DEVICE)
+    anchor_scales = global_cfg.MODEL.ANCHOR_GENERATOR.SIZES
+
+    [n, _, w, h] = y.shape
+    y = torch.chunk(y, len(anchor_scales[0]), dim=1)  # todo hard coded scales #todo [0] is wrong
+    y_list = []
+    for _y in y:
+        y_list.append(make_grid(_y, nrow=2, pad_value=1))
+    loss_grid = torch.cat(y_list, dim=1)
+
+    a = torch.ones(gt_classes.shape) * 0.5  # gray foreground by default
+    a[gt_classes == -1] = 1  # white unmatched
+    a[gt_classes == 80] = 0  # black background
+    gt_classes = a.to(device)
+
+    gt = gt_classes.reshape(n, w, h, -1, 1) #(n, w, h, anchors, c)
+
+    gt = torch.chunk(gt, len(anchor_scales[0]), dim=3)  # todo hard coded scales #todo [0] is wrong
+    gt_list = []
+    for _gt in gt:
+        _gt = _gt.squeeze(dim=3)
+        _gt = _gt.permute(0, 3, 1, 2)
+        gt_list.append(make_grid(_gt, nrow=2, pad_value=1))
+    gt_scales = torch.cat(gt_list, dim=1)
+
+    # save_image(gt / 1., os.path.join(global_cfg.OUTPUT_DIR, str(self.iter) + "iter_gt.jpg"), nrow=2)
+
+    pixel_mean = torch.Tensor(global_cfg.MODEL.PIXEL_MEAN).to(device).view(3, 1, 1)
+    pixel_std = torch.Tensor(global_cfg.MODEL.PIXEL_STD).to(device).view(3, 1, 1)
+    denormalizer = lambda x: (x * pixel_std) + pixel_mean
+    input_images = denormalizer(input_images)
+
+    input_grid = make_grid(input_images/255., nrow=2)
+    # save_image(input_images/255., global_cfg.OUTPUT_DIR + "/test.jpg", nrow=2)
+    bm = torch.chunk(betting_map, global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUT_CHANNELS, dim=1) #todo hard coded scales
+    bm_list = []
+
+    # heatmap = torch.empty(1, 252, 271).uniform_(0, 1)
+    # heatmap = torch.cat((heatmap, torch.zeros(2, 252, 271)))
+    #
+    # import torchvision.transforms.functional as TF
+    # img = TF.to_pil_image(x)  # assuming your image in x
+    # h_img = TF.to_pil_image(heatmap)
+    #
+    # res = Image.blend(img, h_img, 0.5)
+
+    for _bm in bm:
+        # Create heatmap image in red channel
+        g_channel = torch.zeros_like(_bm)
+        b_channel = torch.zeros_like(_bm)
+        _bm = torch.cat((_bm, g_channel, b_channel), dim=1)
+        bm_list.append(make_grid(_bm, nrow=2))
+    betting_map_grid = torch.cat(bm_list, dim=1)
+
+    # blended = betting_map_grid*0.5 + input_grid*0.5
+    # storage.put_image("blended", blended)
+    cm = plt.get_cmap('jet')
+    betting_map_grid_heatmap = cm(betting_map_grid[0, :, :].detach().cpu())
+    if global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUT_CHANNELS > 1:
+        input_grid = input_grid.repeat(1, global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUT_CHANNELS, 1)
+        blended = betting_map_grid_heatmap.transpose(2, 0, 1)[:3, :, :] * 0.5 + input_grid.cpu().numpy() * 0.5
+    else:
+        blended = betting_map_grid_heatmap.transpose(2, 0, 1)[:3, :, :] * 0.5 + input_grid.cpu().numpy() * 0.5
+
+    # blended = betting_map_grid_heatmap.transpose(2, 0, 1)[:3, :, :] * 0.5 + input_grid.cpu().numpy() * 0.5
+    storage.put_image("blended", blended)
+
+    # loss_grid = make_grid(y, nrow=2)  # todo loss_grid range
+    storage.put_image("gt_bettingmap", torch.cat((gt_scales, betting_map_grid), dim=1))
+    # all = torch.cat((input_grid, loss_grid), dim=1)
+    storage.put_image("loss", loss_grid)
+    storage.put_image("input", input_grid)
 
 
 class GANTrainer(TrainerBase):
@@ -188,7 +265,7 @@ class GANTrainer(TrainerBase):
         self.device = self.cfg.MODEL.DEVICE
 
     @classmethod
-    def build_optimizer_gambler(self, cfg, gambler_model) -> torch.optim.Optimizer:
+    def build_optimizer_gambler(cls, cfg, gambler_model) -> torch.optim.Optimizer:
         """
         Returns:
             torch.optim.Optimizer:
@@ -220,7 +297,7 @@ class GANTrainer(TrainerBase):
         return gambler_optimizer
 
     @classmethod
-    def build_optimizer_detector(self, cfg, detection_model) -> torch.optim.Optimizer:
+    def build_optimizer_detector(cls, cfg, detection_model) -> torch.optim.Optimizer:
         """
         Returns:
             torch.optim.Optimizer:
@@ -251,7 +328,7 @@ class GANTrainer(TrainerBase):
         return detector_optimizer
 
     @classmethod
-    def build_train_loader(self, cfg):
+    def build_train_loader(cls, cfg):
         """
                 Returns:
                     iterable
@@ -262,12 +339,164 @@ class GANTrainer(TrainerBase):
         return build_detection_train_loader(cfg)
 
     @classmethod
+    def build_test_loader(cls, cfg, dataset_name):
+        """
+        Returns:
+            iterable
+
+        It now calls :func:`detectron2.data.build_detection_test_loader`.
+        Overwrite it if you'd like a different data loader.
+        """
+        return build_detection_test_loader(cfg, dataset_name)
+
+    @classmethod
+    def build_evaluator(cls, cfg, dataset_name, output_folder=None):
+        """
+        Create evaluator(s) for a given dataset.
+        This uses the special metadata "evaluator_type" associated with each builtin dataset.
+        For your own dataset, you can simply create an evaluator manually in your
+        script and do not have to worry about the hacky if-else logic here.
+        """
+        if output_folder is None:
+            output_folder = os.path.join(cfg.OUTPUT_DIR, "inference")
+        evaluator_list = []
+        evaluator_type = MetadataCatalog.get(dataset_name).evaluator_type
+        # if evaluator_type in ["sem_seg", "coco_panoptic_seg"]:
+        #     evaluator_list.append(
+        #         SemSegEvaluator(
+        #             dataset_name,
+        #             distributed=True,
+        #             num_classes=cfg.MODEL.SEM_SEG_HEAD.NUM_CLASSES,
+        #             ignore_label=cfg.MODEL.SEM_SEG_HEAD.IGNORE_VALUE,
+        #             output_dir=output_folder,
+        #         )
+        #     )
+        if evaluator_type in ["coco", "coco_panoptic_seg"]:
+            evaluator_list.append(COCOEvaluator(dataset_name, cfg, True, output_folder))
+        # if evaluator_type == "coco_panoptic_seg":
+        #     evaluator_list.append(COCOPanopticEvaluator(dataset_name, output_folder))
+        # elif evaluator_type == "cityscapes":
+        #     assert (
+        #             torch.cuda.device_count() >= comm.get_rank()
+        #     ), "CityscapesEvaluator currently do not work with multiple machines."
+        #     return CityscapesEvaluator(dataset_name)
+        # elif evaluator_type == "pascal_voc":
+        #     return PascalVOCDetectionEvaluator(dataset_name)
+        elif evaluator_type == "lvis":
+            return LVISEvaluator(dataset_name, cfg, True, output_folder)
+        if len(evaluator_list) == 0:
+            raise NotImplementedError(
+                "no Evaluator for the dataset {} with the type {}".format(
+                    dataset_name, evaluator_type
+                )
+            )
+        elif len(evaluator_list) == 1:
+            return evaluator_list[0]
+        return DatasetEvaluators(evaluator_list)
+
+    @classmethod
     def build_lr_scheduler(cls, cfg, optimizer):
         """
         It now calls :func:`detectron2.solver.build_lr_scheduler`.
         Overwrite it if you'd like a different scheduler.
         """
         return build_lr_scheduler(cfg, optimizer)
+
+    @classmethod
+    def test(cls, cfg, model, evaluators=None):
+        """
+        Args:
+            cfg (CfgNode):
+            model (nn.Module):
+            evaluators (list[DatasetEvaluator] or None): if None, will call
+                :meth:`build_evaluator`. Otherwise, must have the same length as
+                `cfg.DATASETS.TEST`.
+
+        Returns:
+            dict: a dict of result metrics
+        """
+        logger = setup_logger(output=cfg.OUTPUT_DIR, distributed_rank=comm.get_rank(), name="imbalance detection")
+        if isinstance(evaluators, DatasetEvaluator):
+            evaluators = [evaluators]
+        if evaluators is not None:
+            assert len(cfg.DATASETS.TEST) == len(evaluators), "{} != {}".format(
+                len(cfg.DATASETS.TEST), len(evaluators)
+            )
+
+        results = OrderedDict()
+        for idx, dataset_name in enumerate(cfg.DATASETS.TEST):
+            data_loader = cls.build_test_loader(cfg, dataset_name)
+            # When evaluators are passed in as arguments,
+            # implicitly assume that evaluators can be created before data_loader.
+            if evaluators is not None:
+                evaluator = evaluators[idx]
+            else:
+                try:
+                    evaluator = cls.build_evaluator(cfg, dataset_name)
+                except NotImplementedError:
+                    logger.warning(
+                        "No evaluator found. Use `DefaultTrainer.test(evaluators=)`, "
+                        "or implement its `build_evaluator` method."
+                    )
+                    results[dataset_name] = {}
+                    continue
+            results_i = inference_on_dataset(model, data_loader, evaluator)
+            results[dataset_name] = results_i
+            if comm.is_main_process():
+                assert isinstance(
+                    results_i, dict
+                ), "Evaluator must return a dict on the main process. Got {} instead.".format(
+                    results_i
+                )
+                logger.info("Evaluation results for {} in csv format:".format(dataset_name))
+                print_csv_format(results_i)
+
+        if len(results) == 1:
+            results = list(results.values())[0]
+        return results
+
+    @classmethod
+    def test_and_visualize(cls, cfg, detector, gambler, evaluators=None):
+
+        logger = setup_logger(output=cfg.OUTPUT_DIR, distributed_rank=comm.get_rank(), name="imbalance detection")
+        if isinstance(evaluators, DatasetEvaluator):
+            evaluators = [evaluators]
+        if evaluators is not None:
+            assert len(cfg.DATASETS.TEST) == len(evaluators), "{} != {}".format(
+                len(cfg.DATASETS.TEST), len(evaluators)
+            )
+
+        results = OrderedDict()
+        for idx, dataset_name in enumerate(cfg.DATASETS.TEST):
+            data_loader = cls.build_test_loader(cfg, dataset_name)
+            # When evaluators are passed in as arguments,
+            # implicitly assume that evaluators can be created before data_loader.
+            if evaluators is not None:
+                evaluator = evaluators[idx]
+            else:
+                try:
+                    evaluator = cls.build_evaluator(cfg, dataset_name)
+                except NotImplementedError:
+                    logger.warning(
+                        "No evaluator found. Use `DefaultTrainer.test(evaluators=)`, "
+                        "or implement its `build_evaluator` method."
+                    )
+                    results[dataset_name] = {}
+                    continue
+            results_i = inference_and_visualize(detector, gambler, data_loader, evaluator)
+            results[dataset_name] = results_i
+            if comm.is_main_process():
+                assert isinstance(
+                    results_i, dict
+                ), "Evaluator must return a dict on the main process. Got {} instead.".format(
+                    results_i
+                )
+                logger.info("Evaluation results for {} in csv format:".format(dataset_name))
+                print_csv_format(results_i)
+
+        if len(results) == 1:
+            results = list(results.values())[0]
+        return results
 
     def build_hooks(self, model, optimizer, scheduler, checkpointer):
         """
@@ -385,6 +614,36 @@ class GANTrainer(TrainerBase):
         #     ret.append(hooks.PeriodicWriter(self.build_writers()))
         return ret
 
+    def build_writers(self):
+        """
+        Build a list of writers to be used. By default it contains
+        writers that write metrics to the screen,
+        a json file, and a tensorboard event file respectively.
+        If you'd like a different list of writers, you can overwrite it in
+        your trainer.
+
+        Returns:
+            list[EventWriter]: a list of :class:`EventWriter` objects.
+
+        It is now implemented by:
+
+        .. code-block:: python
+
+            return [
+                CommonMetricPrinter(self.max_iter),
+                JSONWriter(os.path.join(self.cfg.OUTPUT_DIR, "metrics.json")),
+                TensorboardXWriter(self.cfg.OUTPUT_DIR),
+            ]
+
+        """
+        # Assume the default print/log frequency.
+        return [
+            # It may not always print what you want to see, since it prints "common" metrics only.
+            CommonMetricPrinter(self.max_iter),
+            JSONWriter(os.path.join(self.cfg.OUTPUT_DIR, "metrics.json")),
+            TensorboardXWriter(self.cfg.OUTPUT_DIR),
+        ]
+
     def _detect_anomaly(self, losses, loss_dict):
         if not torch.isfinite(losses).all():
             raise FloatingPointError(
@@ -447,144 +706,6 @@ class GANTrainer(TrainerBase):
             verify_results(self.cfg, self._last_eval_results)
             return self._last_eval_results
 
-    @classmethod
-    def build_test_loader(cls, cfg, dataset_name):
-        """
-        Returns:
-            iterable
-
-        It now calls :func:`detectron2.data.build_detection_test_loader`.
-        Overwrite it if you'd like a different data loader.
-        """
-        return build_detection_test_loader(cfg, dataset_name)
-
-    def build_writers(self):
-        """
-        Build a list of writers to be used. By default it contains
-        writers that write metrics to the screen,
-        a json file, and a tensorboard event file respectively.
-        If you'd like a different list of writers, you can overwrite it in
-        your trainer.
-
-        Returns:
-            list[EventWriter]: a list of :class:`EventWriter` objects.
-
-        It is now implemented by:
-
-        .. code-block:: python
-
-            return [
-                CommonMetricPrinter(self.max_iter),
-                JSONWriter(os.path.join(self.cfg.OUTPUT_DIR, "metrics.json")),
-                TensorboardXWriter(self.cfg.OUTPUT_DIR),
-            ]
-
-        """
-        # Assume the default print/log frequency.
-        return [
-            # It may not always print what you want to see, since it prints "common" metrics only.
-            CommonMetricPrinter(self.max_iter),
-            JSONWriter(os.path.join(self.cfg.OUTPUT_DIR, "metrics.json")),
-            TensorboardXWriter(self.cfg.OUTPUT_DIR),
-        ]
-
-    def test(self, cfg, model, evaluators=None):
-        """
-        Args:
-            cfg (CfgNode):
-            model (nn.Module):
-            evaluators (list[DatasetEvaluator] or None): if None, will call
-                :meth:`build_evaluator`. Otherwise, must have the same length as
-                `cfg.DATASETS.TEST`.
-
-        Returns:
-            dict: a dict of result metrics
-        """
-        logger = setup_logger(output=cfg.OUTPUT_DIR, distributed_rank=comm.get_rank(), name="imbalance detection")
-        if isinstance(evaluators, DatasetEvaluator):
-            evaluators = [evaluators]
-        if evaluators is not None:
-            assert len(cfg.DATASETS.TEST) == len(evaluators), "{} != {}".format(
-                len(cfg.DATASETS.TEST), len(evaluators)
-            )
-
-        results = OrderedDict()
-        for idx, dataset_name in enumerate(cfg.DATASETS.TEST):
-            data_loader = self.build_test_loader(cfg, dataset_name)
-            # When evaluators are passed in as arguments,
-            # implicitly assume that evaluators can be created before data_loader.
-            if evaluators is not None:
-                evaluator = evaluators[idx]
-            else:
-                try:
-                    evaluator = self.build_evaluator(cfg, dataset_name)
-                except NotImplementedError:
-                    logger.warning(
-                        "No evaluator found. Use `DefaultTrainer.test(evaluators=)`, "
-                        "or implement its `build_evaluator` method."
-                    )
-                    results[dataset_name] = {}
-                    continue
-            results_i = inference_on_dataset(model, data_loader, evaluator)
-            results[dataset_name] = results_i
-            if comm.is_main_process():
-                assert isinstance(
-                    results_i, dict
-                ), "Evaluator must return a dict on the main process. Got {} instead.".format(
-                    results_i
-                )
-                logger.info("Evaluation results for {} in csv format:".format(dataset_name))
-                print_csv_format(results_i)
-
-        if len(results) == 1:
-            results = list(results.values())[0]
-        return results
-
-    @classmethod
-    def build_evaluator(cls, cfg, dataset_name, output_folder=None):
-        """
-        Create evaluator(s) for a given dataset.
-        This uses the special metadata "evaluator_type" associated with each builtin dataset.
-        For your own dataset, you can simply create an evaluator manually in your
-        script and do not have to worry about the hacky if-else logic here.
-        """
-        if output_folder is None:
-            output_folder = os.path.join(cfg.OUTPUT_DIR, "inference")
-        evaluator_list = []
-        evaluator_type = MetadataCatalog.get(dataset_name).evaluator_type
-        # if evaluator_type in ["sem_seg", "coco_panoptic_seg"]:
-        #     evaluator_list.append(
-        #         SemSegEvaluator(
-        #             dataset_name,
-        #             distributed=True,
-        #             num_classes=cfg.MODEL.SEM_SEG_HEAD.NUM_CLASSES,
-        #             ignore_label=cfg.MODEL.SEM_SEG_HEAD.IGNORE_VALUE,
-        #             output_dir=output_folder,
-        #         )
-        #     )
-        if evaluator_type in ["coco", "coco_panoptic_seg"]:
-            evaluator_list.append(COCOEvaluator(dataset_name, cfg, True, output_folder))
-        # if evaluator_type == "coco_panoptic_seg":
-        #     evaluator_list.append(COCOPanopticEvaluator(dataset_name, output_folder))
-        # elif evaluator_type == "cityscapes":
-        #     assert (
-        #             torch.cuda.device_count() >= comm.get_rank()
-        #     ), "CityscapesEvaluator currently do not work with multiple machines."
-        #     return CityscapesEvaluator(dataset_name)
-        # elif evaluator_type == "pascal_voc":
-        #     return PascalVOCDetectionEvaluator(dataset_name)
-        elif evaluator_type == "lvis":
-            return LVISEvaluator(dataset_name, cfg, True, output_folder)
-        if len(evaluator_list) == 0:
-            raise NotImplementedError(
-                "no Evaluator for the dataset {} with the type {}".format(
-                    dataset_name, evaluator_type
-                )
-            )
-        elif len(evaluator_list) == 1:
-            return evaluator_list[0]
-        return DatasetEvaluators(evaluator_list)
-
     def resume_or_load(self, resume=True):
         """
         If `resume==True`, and last checkpoint exists, resume from it.
@@ -602,75 +723,6 @@ class GANTrainer(TrainerBase):
             )
             + 1
         )
-
-    def visualize_training(self, gt_classes, y, betting_map, input_images):
-        storage = get_event_storage()
-        device = torch.device(global_cfg.MODEL.DEVICE)
-        anchor_scales = global_cfg.MODEL.ANCHOR_GENERATOR.SIZES
-
-        [n, _, w, h] = y.shape
-        y = torch.chunk(y, len(anchor_scales[0]), dim=1)  # todo hard coded scales #todo [0] is wrong
-        y_list = []
-        for _y in y:
-            y_list.append(make_grid(_y, nrow=2, pad_value=1))
-        loss_grid = torch.cat(y_list, dim=1)
-
-        a = torch.ones(gt_classes.shape) * 0.5  # gray foreground by default
-        a[gt_classes == -1] = 1  # white unmatched
-        a[gt_classes == 80] = 0  # black background
-        gt_classes = a.to(device)
-
-        gt = gt_classes.reshape(n, w, h, -1, 1) #(n, w, h, anchors, c)
-
-        gt = torch.chunk(gt, len(anchor_scales[0]), dim=3)  # todo hard coded scales #todo [0] is wrong
-        gt_list = []
-        for _gt in gt:
-            _gt = _gt.squeeze(dim=3)
-            _gt = _gt.permute(0, 3, 1, 2)
-            gt_list.append(make_grid(_gt, nrow=2, pad_value=1))
-        gt_scales = torch.cat(gt_list, dim=1)
-
-        # save_image(gt / 1., os.path.join(global_cfg.OUTPUT_DIR, str(self.iter) + "iter_gt.jpg"), nrow=2)
-
-        pixel_mean = torch.Tensor(global_cfg.MODEL.PIXEL_MEAN).to(device).view(3, 1, 1)
-        pixel_std = torch.Tensor(global_cfg.MODEL.PIXEL_STD).to(device).view(3, 1, 1)
-        denormalizer = lambda x: (x * pixel_std) + pixel_mean
-        input_images = denormalizer(input_images)
-
-        input_grid = make_grid(input_images/255., nrow=2)
-        # save_image(input_images/255., global_cfg.OUTPUT_DIR + "/test.jpg", nrow=2)
-        bm = torch.chunk(betting_map, global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUT_CHANNELS, dim=1) #todo hard coded scales
-        bm_list = []
-
-        # heatmap = torch.empty(1, 252, 271).uniform_(0, 1)
-        # heatmap = torch.cat((heatmap, torch.zeros(2, 252, 271)))
-        #
-        # import torchvision.transforms.functional as TF
-        # img = TF.to_pil_image(x)  # assuming your image in x
-        # h_img = TF.to_pil_image(heatmap)
-        #
-        # res = Image.blend(img, h_img, 0.5)
-
-        for _bm in bm:
-            # Create heatmap image in red channel
-            g_channel = torch.zeros_like(_bm)
-            b_channel = torch.zeros_like(_bm)
-            _bm = torch.cat((_bm, g_channel, b_channel), dim=1)
-            bm_list.append(make_grid(_bm, nrow=2))
-        betting_map_grid = torch.cat(bm_list, dim=1)
-
-        # blended = betting_map_grid*0.5 + input_grid*0.5
-        # storage.put_image("blended", blended)
-        cm = plt.get_cmap('jet')
-        betting_map_grid_heatmap = cm(betting_map_grid[0, :, :].detach().cpu())
-        blended = betting_map_grid_heatmap.transpose(2, 0, 1)[:3, :, :] * 0.5 + input_grid.cpu().numpy() * 0.5
-        storage.put_image("blended", blended)
-
-        # loss_grid = make_grid(y, nrow=2)  # todo loss_grid range
-        storage.put_image("gt_bettingmap", torch.cat((gt_scales, betting_map_grid), dim=1))
-        # all = torch.cat((input_grid, loss_grid), dim=1)
-        storage.put_image("loss", loss_grid)
-        storage.put_image("input", input_grid)
 
     def softmax_ce_gambler_loss(self, predictions, betting_map, gt_classes):
 
@@ -740,7 +792,7 @@ class GANTrainer(TrainerBase):
             reduction="sum")
         loss_cls = loss_cls / max(1, num_foreground)
 
-        y = torch.ones((list(valid_idxs.shape)[0], 80)).to(self.device)
+        y = torch.zeros((list(valid_idxs.shape)[0], 80)).to(self.device)
         y[valid_idxs, :] = loss_before_weighting.clone().detach()
         y = y.reshape(n, w, h, num_classes, -1) #(n,w,h,c,a)
         y = y.permute(0, 3, 4, 1, 2)
@@ -750,16 +802,8 @@ class GANTrainer(TrainerBase):
         loss_before_weighting = loss_before_weighting / max(1, num_foreground)
         return y, loss_before_weighting, loss_cls
 
-    def sigmoid_loss(
-            self,
-            inputs,
-            targets,
-            weights,
-            mode: str = "sigmoid",
-            alpha: float = -1,
-            gamma: float = 2,
-            reduction: str = "none",
-    ):
+    @staticmethod
+    def sigmoid_loss(inputs, targets, weights, mode: str = "sigmoid", alpha: float = -1, gamma: float = 2, reduction: str = "none"):
         """
         Weighted sigmoid loss that could be like focal loss
         Args:
@@ -847,7 +891,7 @@ class GANTrainer(TrainerBase):
             logger.info(f"Iteration {self.iter} in Gambler")
 
             betting_map = self.gambler_model(gambler_input)
-            logger.debug(f"Gambler bets: max:{torch.max(betting_map)} min:{torch.min(betting_map)} mean:{torch.mean(betting_map)}")
+            logger.debug(f"Gambler bets: max:{torch.max(betting_map)} min:{torch.min(betting_map)} mean:{torch.mean(betting_map)} median: {torch.median(betting_map)}")
 
             y, loss_before_weighting, loss_gambler = self.sigmoid_gambler_loss(generated_output['pred_class_logits'], betting_map, gt_classes, normalize_w=True, detach_pred=False)  #todo not detaching
             # loss_gambler = self.softmax_ce_gambler_loss(generated_output['pred_class_logits'][0].detach(), betting_map, gt_classes)
@@ -855,7 +899,7 @@ class GANTrainer(TrainerBase):
             if self.vis_period > 0:
                 storage = get_event_storage()
                 if storage.iter % self.vis_period == 0:
-                    self.visualize_training(gt_classes, y, betting_map, input_images)
+                    visualize_training(gt_classes, y, betting_map, input_images)
 
             loss_dict.update({"loss_box_reg": loss_dict["loss_box_reg"] * self.regression_loss_lambda})
             loss_gambler = loss_gambler * self.gambler_loss_lambda
@@ -890,7 +934,7 @@ class GANTrainer(TrainerBase):
 
             betting_map = self.gambler_model(gambler_input)
             # logger.debug(f"Gambler bets: {betting_map}")
-            logger.debug(f"Gambler bets: max:{torch.max(betting_map)} min:{torch.min(betting_map)} mean: :{torch.mean(betting_map)}")
+            logger.debug(f"Gambler bets: max:{torch.max(betting_map)} min:{torch.min(betting_map)} mean:{torch.mean(betting_map)} median: {torch.median(betting_map)}")
 
             # weighting the loss with the output of the gambler
             _, loss_before_weighting, loss_gambler = self.sigmoid_gambler_loss(generated_output['pred_class_logits'], betting_map, gt_classes, normalize_w=True, detach_pred=False) # todo not detaching
@@ -944,16 +988,25 @@ def setup(args):
 def main(args):
     cfg = setup(args)
 
-    # todo for now ignore this evaluation only
-    # if args.eval_only:
-    #     model = Trainer.build_model(cfg)
-    #     DetectionCheckpointer(model, save_dir=cfg.OUTPUT_DIR).resume_or_load(
-    #         cfg.MODEL.WEIGHTS, resume=args.resume
-    #     )
-    #     res = Trainer.test(cfg, model)
-    #     if comm.is_main_process():
-    #         verify_results(cfg, res)
-    #     return res
+    if args.eval_only:
+        detector = build_detector(cfg) #.train .test
+        DetectionCheckpointer(detector, save_dir=cfg.OUTPUT_DIR).resume_or_load(
+            cfg.MODEL.WEIGHTS, resume=args.resume
+        )
+        res = GANTrainer.test(cfg, detector)
+        if comm.is_main_process():
+            verify_results(cfg, res)
+        return res
+    elif args.eval_visualize:
+        detector = build_detector(cfg)
+        gambler = build_gambler(cfg)
+        DetectionCheckpointer(detector, save_dir=cfg.OUTPUT_DIR).resume_or_load(
+            cfg.MODEL.WEIGHTS, resume=args.resume
+        )
+        DetectionCheckpointer(gambler, save_dir=cfg.OUTPUT_DIR).resume_or_load(
+            cfg.MODEL.GAMBLER_HEAD.WEIGHTS, resume=args.resume
+        )
+        res = GANTrainer.test_and_visualize(cfg, detector, gambler)
 
     trainer = GANTrainer(cfg)
     trainer.resume_or_load(resume=args.resume)

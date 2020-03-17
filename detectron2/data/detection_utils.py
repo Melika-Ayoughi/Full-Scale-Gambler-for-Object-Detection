@@ -410,6 +410,7 @@ def build_transform_gen(cfg, is_train):
     logger = logging.getLogger(__name__)
     tfm_gens = [T.ResizeShortestEdge(min_size, max_size, sample_style)]
     if is_train:
-        tfm_gens.append(T.RandomFlip())
-        logger.info("TransformGens used in training: " + str(tfm_gens))
+        if cfg.INPUT.RANDOM_FLIPPING:
+            tfm_gens.append(T.RandomFlip())
+            logger.info("TransformGens used in training: " + str(tfm_gens))
     return tfm_gens
