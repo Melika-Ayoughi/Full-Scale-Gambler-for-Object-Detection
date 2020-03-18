@@ -1,0 +1,28 @@
+_BASE_: "./simple_retinanet.yaml"
+MODEL:
+  WEIGHTS: "./output/retinanet_baselines/simple_retinanet/simple_retina_overfit/p4_128_11scales/model_final.pth"
+  GAMBLER_HEAD:
+    GAMBLER_ITERATIONS: 100
+    DETECTOR_ITERATIONS: 0
+    GAMBLER_OUTPUT: "BAHW" #"B1HW"
+    GAMBLER_LAMBDA: 200
+    GAMBLER_OUTSIDE_LAMBDA: 1
+    GAMBLER_TEMPERATURE: 0.02
+    GAMBLER_LOSS_MODE: "focal"
+    GAMBLER_OUT_CHANNELS: 11
+DATASETS:
+  TRAIN: ("coco_2017_train_100samples",)
+  TEST: ("coco_2017_train_100samples",)
+TEST:
+    EVAL_PERIOD: 1000 #500
+SOLVER:
+  STEPS: (5900,)
+  MAX_ITER: 6000
+  CHECKPOINT_PERIOD: 6000
+INPUT:
+  MAX_SIZE_TEST: 640
+  MAX_SIZE_TRAIN: 640
+  MIN_SIZE_TEST: 640
+  MIN_SIZE_TRAIN: (640, )
+  RANDOM_FLIPPING: False
+OUTPUT_DIR: "./output/gambler/debug"

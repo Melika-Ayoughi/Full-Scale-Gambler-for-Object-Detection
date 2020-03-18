@@ -186,7 +186,8 @@ class GANTrainer(TrainerBase):
         self.gambler_model = build_gambler(cfg).train()
         self.detection_model = build_detector(cfg).train()
 
-        # DetectionCheckpointer(self.detection_model, save_dir=cfg.OUTPUT_DIR).resume_or_load(cfg.MODEL.WEIGHTS, resume=True)
+        # self.detection_checkpointer.resume_or_load(self.cfg.MODEL.WEIGHTS, resume=resume)
+        DetectionCheckpointer(self.detection_model, save_dir=cfg.OUTPUT_DIR).resume_or_load(cfg.MODEL.WEIGHTS, resume=True)
 
 
         self.gambler_optimizer = self.build_optimizer_gambler(cfg, self.gambler_model)
@@ -937,8 +938,13 @@ class GANTrainer(TrainerBase):
             logger.debug(f"Gambler bets: max:{torch.max(betting_map)} min:{torch.min(betting_map)} mean:{torch.mean(betting_map)} median: {torch.median(betting_map)}")
 
             # weighting the loss with the output of the gambler
-            _, loss_before_weighting, loss_gambler = self.sigmoid_gambler_loss(generated_output['pred_class_logits'], betting_map, gt_classes, normalize_w=True, detach_pred=False) # todo not detaching
+            y, loss_before_weighting, loss_gambler = self.sigmoid_gambler_loss(generated_output['pred_class_logits'], betting_map, gt_classes, normalize_w=True, detach_pred=False) # todo not detaching
             # loss_gambler = self.softmax_ce_gambler_loss(generated_output['pred_class_logits'][0].detach(), betting_map, gt_classes)
+
+            if self.vis_period > 0:
+                storage = get_event_storage()
+                if storage.iter % self.vis_period == 0:
+                    visualize_training(gt_classes, y, betting_map, input_images)
 
             loss_dict.update({"loss_box_reg": loss_dict["loss_box_reg"] * self.regression_loss_lambda})
             loss_gambler = loss_gambler * self.gambler_loss_lambda
