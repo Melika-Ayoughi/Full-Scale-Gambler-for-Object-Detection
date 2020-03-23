@@ -89,7 +89,7 @@ def permute_all_weights_to_N_HWA_K_and_concat(weights, num_classes=80, normalize
     weights_flattened = [permute_to_N_HWA_K(w, num_classes) for w in weights] # Size=(N,HWA,K)
     weights_flattened = [w + global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_TEMPERATURE for w in weights_flattened]
     if normalize_w is True:
-        weights_flattened = [w / torch.sum(w, dim=[1], keepdim=True) for w in weights_flattened] #normalize by wxh only for now #todo experiment with normalizing across anchors -> distribute bets among scales maybe some are more important
+        weights_flattened = [w / torch.sum(w, dim=[1,2], keepdim=True) for w in weights_flattened] #normalize by wxh only for now #todo experiment with normalizing across anchors -> distribute bets among scales maybe some are more important
     # concatenate on the first dimension (representing the feature levels), to
     # take into account the way the labels were generated (with all feature maps
     # being concatenated as well)
@@ -161,16 +161,19 @@ def visualize_training(gt_classes, y, betting_map, input_images):
         input_grid = input_grid.repeat(1, global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUT_CHANNELS, 1)
         blended = betting_map_grid_heatmap.transpose(2, 0, 1)[:3, :, :] * 0.5 + input_grid.cpu().numpy() * 0.5
     else:
-        blended = betting_map_grid_heatmap.transpose(2, 0, 1)[:3, :, :] * 0.5 + input_grid.cpu().numpy() * 0.5
+        blended = betting_map_grid_heatmap.transpose(2, 0, 1)[:3, :, :] * 0.4 + input_grid.cpu().numpy() * 0.6
 
     # blended = betting_map_grid_heatmap.transpose(2, 0, 1)[:3, :, :] * 0.5 + input_grid.cpu().numpy() * 0.5
-    storage.put_image("blended", blended)
+    # storage.put_image("blended", blended)
+    # storage.put_image("concat", np.concatenate((blended, loss_grid.cpu().numpy(), input_grid.cpu().numpy(), gt_scales.cpu().numpy()), axis=2))
+    plt.imsave(os.path.join(global_cfg.OUTPUT_DIR, str(storage.iter) +".jpg"), np.concatenate((blended, (loss_grid/16.).cpu().numpy(), input_grid.cpu().numpy(), gt_scales.cpu().numpy()), axis=2).transpose(1,2,0))
 
     # loss_grid = make_grid(y, nrow=2)  # todo loss_grid range
-    storage.put_image("gt_bettingmap", torch.cat((gt_scales, betting_map_grid), dim=1))
+    # storage.put_image("gt_bettingmap", torch.cat((gt_scales, betting_map_grid), dim=1))
+    # storage.put_image("gt", gt_scales)
     # all = torch.cat((input_grid, loss_grid), dim=1)
-    storage.put_image("loss", loss_grid)
-    storage.put_image("input", input_grid)
+    # storage.put_image("loss", loss_grid)
+    # storage.put_image("input", input_grid)
 
 
 class GANTrainer(TrainerBase):
@@ -1015,7 +1018,7 @@ def main(args):
         res = GANTrainer.test_and_visualize(cfg, detector, gambler)
 
     trainer = GANTrainer(cfg)
-    trainer.resume_or_load(resume=args.resume)
+    # trainer.resume_or_load(resume=args.resume)
     return trainer.train()
 
 

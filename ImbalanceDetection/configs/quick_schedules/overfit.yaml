@@ -1,6 +1,8 @@
 _BASE_: "./simple_retinanet.yaml"
+SEED: 57330821
 MODEL:
-  WEIGHTS: "./output/retinanet_baselines/simple_retinanet/simple_retina_overfit/p4_128_11scales/model_final.pth"
+  WEIGHTS: "./output/gambler/Detector_only/model_0000999.pth"
+#  WEIGHTS: "./output/retinanet_baselines/simple_retinanet/simple_retina_overfit/p4_128_11scales/model_final.pth"
   GAMBLER_HEAD:
     GAMBLER_ITERATIONS: 100
     DETECTOR_ITERATIONS: 0
@@ -11,18 +13,27 @@ MODEL:
     GAMBLER_LOSS_MODE: "focal"
     GAMBLER_OUT_CHANNELS: 11
 DATASETS:
+#  TRAIN: ("coco_2017_train_8samples",)
+#  TEST: ("coco_2017_train_8samples",)
   TRAIN: ("coco_2017_train_100samples",)
   TEST: ("coco_2017_train_100samples",)
 TEST:
-    EVAL_PERIOD: 1000 #500
+  EVAL_PERIOD: 1000 #500
+#  AUG:
+#    ENABLED: false
+#    FLIP: false
+#    MAX_SIZE: 4000
+#    MIN_SIZES:(600, )
 SOLVER:
   STEPS: (5900,)
   MAX_ITER: 6000
-  CHECKPOINT_PERIOD: 6000
+  CHECKPOINT_PERIOD: 1000
 INPUT:
   MAX_SIZE_TEST: 640
   MAX_SIZE_TRAIN: 640
   MIN_SIZE_TEST: 640
   MIN_SIZE_TRAIN: (640, )
   RANDOM_FLIPPING: False
-OUTPUT_DIR: "./output/gambler/debug"
+DATALOADER:
+    ASPECT_RATIO_GROUPING: False
+OUTPUT_DIR: "./output/gambler/Middle-way_detector_overfitgamble"
