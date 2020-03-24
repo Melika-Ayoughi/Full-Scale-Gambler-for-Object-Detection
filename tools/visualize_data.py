@@ -13,10 +13,12 @@ from detectron2.data import detection_utils as utils
 from detectron2.data.build import filter_images_with_few_keypoints
 from detectron2.utils.logger import setup_logger
 from detectron2.utils.visualizer import Visualizer
+from imbalancedetection.config import add_gambler_config
 
 
 def setup(args):
     cfg = get_cfg()
+    add_gambler_config(cfg)
     if args.config_file:
         cfg.merge_from_file(args.config_file)
     cfg.merge_from_list(args.opts)

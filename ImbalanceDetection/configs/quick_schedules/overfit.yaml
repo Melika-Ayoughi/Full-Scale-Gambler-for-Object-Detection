@@ -1,11 +1,11 @@
 _BASE_: "./simple_retinanet.yaml"
 SEED: 57330821
 MODEL:
-  WEIGHTS: "./output/gambler/Detector_only/model_0000999.pth"
+#  WEIGHTS: "./output/gambler/Detector_only/model_0000999.pth"
 #  WEIGHTS: "./output/retinanet_baselines/simple_retinanet/simple_retina_overfit/p4_128_11scales/model_final.pth"
   GAMBLER_HEAD:
     GAMBLER_ITERATIONS: 100
-    DETECTOR_ITERATIONS: 0
+    DETECTOR_ITERATIONS: 200
     GAMBLER_OUTPUT: "BAHW" #"B1HW"
     GAMBLER_LAMBDA: 200
     GAMBLER_OUTSIDE_LAMBDA: 1
@@ -25,9 +25,9 @@ TEST:
 #    MAX_SIZE: 4000
 #    MIN_SIZES:(600, )
 SOLVER:
-  STEPS: (5900,)
-  MAX_ITER: 6000
-  CHECKPOINT_PERIOD: 1000
+  STEPS: (8000,)
+  MAX_ITER: 9000
+  CHECKPOINT_PERIOD: 9000
 INPUT:
   MAX_SIZE_TEST: 640
   MAX_SIZE_TRAIN: 640
@@ -36,4 +36,4 @@ INPUT:
   RANDOM_FLIPPING: False
 DATALOADER:
     ASPECT_RATIO_GROUPING: False
-OUTPUT_DIR: "./output/gambler/Middle-way_detector_overfitgamble"
+OUTPUT_DIR: "./output/gambler/debug"

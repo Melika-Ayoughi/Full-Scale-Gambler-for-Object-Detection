@@ -37,8 +37,6 @@ from collections import OrderedDict
 from detectron2.utils.events import CommonMetricPrinter, JSONWriter, TensorboardXWriter
 from detectron2.utils.events import get_event_storage
 from torchvision.utils import make_grid, save_image
-from PIL import Image
-import torchvision.transforms.functional as TF
 import matplotlib.pyplot as plt
 
 
@@ -97,16 +95,26 @@ def permute_all_weights_to_N_HWA_K_and_concat(weights, num_classes=80, normalize
     return weights_flattened
 
 
-def visualize_training(gt_classes, y, betting_map, input_images):
-    storage = get_event_storage()
+def normalize_to_01(input):
+    _max = torch.max(input)
+    _min = torch.min(input)
+    return (input-_min)/(_max-_min)
+
+
+def visualize_training(gt_classes, y, betting_map, input_images, storage):
+    # storage = get_event_storage()
     device = torch.device(global_cfg.MODEL.DEVICE)
     anchor_scales = global_cfg.MODEL.ANCHOR_GENERATOR.SIZES
 
     [n, _, w, h] = y.shape
     y = torch.chunk(y, len(anchor_scales[0]), dim=1)  # todo hard coded scales #todo [0] is wrong
     y_list = []
-    for _y in y:
+    # print("losses per scale: ")
+    for scale, _y in enumerate(y):
+        # print(torch.sum(_y))
+        storage.put_scalar("loss_per_scale/" + str(scale), torch.sum(_y))
         y_list.append(make_grid(_y, nrow=2, pad_value=1))
+    # print("finished losses")
     loss_grid = torch.cat(y_list, dim=1)
 
     a = torch.ones(gt_classes.shape) * 0.5  # gray foreground by default
@@ -145,12 +153,16 @@ def visualize_training(gt_classes, y, betting_map, input_images):
     #
     # res = Image.blend(img, h_img, 0.5)
 
-    for _bm in bm:
+    # print("betting map: ")
+    for scale, _bm in enumerate(bm):
         # Create heatmap image in red channel
+        # print(torch.sum(_bm))
+        storage.put_scalar("weights_per_scale/" + str(scale), torch.sum(_bm))
         g_channel = torch.zeros_like(_bm)
         b_channel = torch.zeros_like(_bm)
         _bm = torch.cat((_bm, g_channel, b_channel), dim=1)
         bm_list.append(make_grid(_bm, nrow=2))
+    # print("finished bettingmap")
     betting_map_grid = torch.cat(bm_list, dim=1)
 
     # blended = betting_map_grid*0.5 + input_grid*0.5
@@ -166,14 +178,15 @@ def visualize_training(gt_classes, y, betting_map, input_images):
     # blended = betting_map_grid_heatmap.transpose(2, 0, 1)[:3, :, :] * 0.5 + input_grid.cpu().numpy() * 0.5
     # storage.put_image("blended", blended)
     # storage.put_image("concat", np.concatenate((blended, loss_grid.cpu().numpy(), input_grid.cpu().numpy(), gt_scales.cpu().numpy()), axis=2))
-    plt.imsave(os.path.join(global_cfg.OUTPUT_DIR, str(storage.iter) +".jpg"), np.concatenate((blended, (loss_grid/16.).cpu().numpy(), input_grid.cpu().numpy(), gt_scales.cpu().numpy()), axis=2).transpose(1,2,0))
+    # loss_grid[loss_grid > 1] = 16.0
+    vis = np.concatenate((blended, (normalize_to_01(loss_grid)).cpu().numpy(), input_grid.cpu().numpy(), gt_scales.cpu().numpy()), axis=2).transpose(1,2,0)
+    # plt.imsave(os.path.join(global_cfg.OUTPUT_DIR, "test.jpg"), vis)
 
-    # loss_grid = make_grid(y, nrow=2)  # todo loss_grid range
     # storage.put_image("gt_bettingmap", torch.cat((gt_scales, betting_map_grid), dim=1))
     # storage.put_image("gt", gt_scales)
-    # all = torch.cat((input_grid, loss_grid), dim=1)
-    # storage.put_image("loss", loss_grid)
+    # storage.put_image("loss", loss_grid)# todo loss_grid range
     # storage.put_image("input", input_grid)
+    return vis
 
 
 class GANTrainer(TrainerBase):
@@ -460,7 +473,7 @@ class GANTrainer(TrainerBase):
         return results
 
     @classmethod
-    def test_and_visualize(cls, cfg, detector, gambler, evaluators=None):
+    def test_and_visualize(cls, cfg, detector, gambler, evaluators=None, mode="dataloader"):
 
         logger = setup_logger(output=cfg.OUTPUT_DIR, distributed_rank=comm.get_rank(), name="imbalance detection")
         if isinstance(evaluators, DatasetEvaluator):
@@ -472,7 +485,9 @@ class GANTrainer(TrainerBase):
 
         results = OrderedDict()
         for idx, dataset_name in enumerate(cfg.DATASETS.TEST):
-            data_loader = cls.build_test_loader(cfg, dataset_name)
+            test_data_loader = cls.build_test_loader(cfg, dataset_name) #todo changed to train loader cause it's not really testing!
+            train_data_loader = cls.build_train_loader(cfg)
+
             # When evaluators are passed in as arguments,
             # implicitly assume that evaluators can be created before data_loader.
             if evaluators is not None:
@@ -487,7 +502,8 @@ class GANTrainer(TrainerBase):
                     )
                     results[dataset_name] = {}
                     continue
-            results_i = inference_and_visualize(detector, gambler, data_loader, evaluator)
+            inference_and_visualize(detector, gambler, train_data_loader, mode)
+            results_i = inference_on_dataset(detector, test_data_loader, evaluator)
             results[dataset_name] = results_i
             if comm.is_main_process():
                 assert isinstance(
@@ -745,7 +761,8 @@ class GANTrainer(TrainerBase):
                                                                                                   -1)) * self.gambler_loss_lambda
         return loss_gambler
 
-    def sigmoid_gambler_loss(self, pred_class_logits, weights, gt_classes, normalize_w=False, detach_pred=False):
+    @staticmethod
+    def sigmoid_gambler_loss(pred_class_logits, weights, gt_classes, normalize_w=False, detach_pred=False):
 
         [n,ca,w,h] = pred_class_logits[0].shape
         if detach_pred is True:
@@ -786,17 +803,17 @@ class GANTrainer(TrainerBase):
         gt_classes_target[foreground_idxs, gt_classes[foreground_idxs]] = 1
 
         # logits loss
-        loss_before_weighting, loss_cls = self.sigmoid_loss(
+        loss_before_weighting, loss_cls = GANTrainer.sigmoid_loss(
             pred_class_logits[valid_idxs],
             gt_classes_target[valid_idxs],
             weights[valid_idxs],  # -1 labels are ignored for calculating the loss
-            mode=self.cfg.MODEL.GAMBLER_HEAD.GAMBLER_LOSS_MODE,
-            alpha=self.cfg.MODEL.RETINANET.FOCAL_LOSS_ALPHA,
-            gamma=self.cfg.MODEL.RETINANET.FOCAL_LOSS_GAMMA,
+            mode=global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_LOSS_MODE,
+            alpha=global_cfg.MODEL.RETINANET.FOCAL_LOSS_ALPHA,
+            gamma=global_cfg.MODEL.RETINANET.FOCAL_LOSS_GAMMA,
             reduction="sum")
         loss_cls = loss_cls / max(1, num_foreground)
 
-        y = torch.zeros((list(valid_idxs.shape)[0], 80)).to(self.device)
+        y = torch.zeros((list(valid_idxs.shape)[0], 80)).to(global_cfg.MODEL.DEVICE)
         y[valid_idxs, :] = loss_before_weighting.clone().detach()
         y = y.reshape(n, w, h, num_classes, -1) #(n,w,h,c,a)
         y = y.permute(0, 3, 4, 1, 2)
@@ -1015,7 +1032,8 @@ def main(args):
         DetectionCheckpointer(gambler, save_dir=cfg.OUTPUT_DIR).resume_or_load(
             cfg.MODEL.GAMBLER_HEAD.WEIGHTS, resume=args.resume
         )
-        res = GANTrainer.test_and_visualize(cfg, detector, gambler)
+        res = GANTrainer.test_and_visualize(cfg, detector, gambler, mode=args.source)
+        return res
 
     trainer = GANTrainer(cfg)
     # trainer.resume_or_load(resume=args.resume)
