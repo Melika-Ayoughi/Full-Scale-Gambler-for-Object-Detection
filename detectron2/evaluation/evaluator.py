@@ -195,7 +195,7 @@ def inference_and_visualize(detector, gambler, data_loader=None, mode="dataloade
     from detectron2.utils.events import CommonMetricPrinter, JSONWriter, TensorboardXWriter
     from detectron2.engine import hooks
 
-    periodic_writer = hooks.PeriodicWriter([TensorboardXWriter(global_cfg.OUTPUT_DIR)])
+    # periodic_writer = hooks.PeriodicWriter([TensorboardXWriter(global_cfg.OUTPUT_DIR)])
     os.makedirs(os.path.join(global_cfg.OUTPUT_DIR, "images"), exist_ok=True)
 
     logger = logging.getLogger(__name__)
@@ -219,16 +219,15 @@ def inference_and_visualize(detector, gambler, data_loader=None, mode="dataloade
                     gambler_input = torch.cat((input_images, scaled_prob), dim=1)
                     betting_map = gambler(gambler_input)
 
-                    y, loss_before_weighting, loss_gambler = GANTrainer.sigmoid_gambler_loss(generated_output['pred_class_logits'], betting_map, gt_classes, normalize_w=True, detach_pred=False)
+                    y, loss_before_weighting, loss_gambler, weights = GANTrainer.sigmoid_gambler_loss(generated_output['pred_class_logits'], betting_map, gt_classes, normalize_w=global_cfg.MODEL.GAMBLER_HEAD.NORMALIZE)
                     vis = visualize_training(gt_classes, y, betting_map, input_images, storage)
-
                     output(vis, os.path.join(global_cfg.OUTPUT_DIR, "images", str(idx) + ".jpg"))
                     # for writer in periodic_writer._writers:
                     #     writer.write()
                     storage.step()
                     torch.cuda.synchronize()
-                for writer in periodic_writer._writers:
-                    writer.close()
+                # for writer in periodic_writer._writers:
+                #     writer.close()
     else:
         dicts = list(chain.from_iterable([DatasetCatalog.get(k) for k in global_cfg.DATASETS.TRAIN]))
         for dic in tqdm.tqdm(dicts):
@@ -242,9 +241,8 @@ def inference_and_visualize(detector, gambler, data_loader=None, mode="dataloade
             gambler_input = torch.cat((input_images, scaled_prob), dim=1)
             betting_map = gambler(gambler_input)
 
-            y, loss_before_weighting, loss_gambler = GANTrainer.sigmoid_gambler_loss(
-                generated_output['pred_class_logits'], betting_map, gt_classes, normalize_w=True, detach_pred=False)
-            visualize_training(gt_classes, y, betting_map, input_images)
+            y, loss_before_weighting, loss_gambler, weights = GANTrainer.sigmoid_gambler_loss(generated_output['pred_class_logits'], betting_map, gt_classes, normalize_w=global_cfg.MODEL.GAMBLER_HEAD.NORMALIZE)
+            visualize_training(gt_classes, y, weights, input_images)
             torch.cuda.synchronize()
 
 

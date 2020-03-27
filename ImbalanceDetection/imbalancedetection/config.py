@@ -11,6 +11,8 @@ def add_gambler_config(cfg):
     _C.MODEL.GAMBLER_HEAD = CN()
     # VARIANTS: SimpleGambler - UnetGambler
     _C.MODEL.GAMBLER_HEAD.NAME = "UnetGambler"
+    # If this option is turned on, pretrained model will be loaded into gambler
+    _C.MODEL.GAMBLER_HEAD.LOAD_PRETRAINED_GAMBLER = False
     # Loading pretrained weights for the gambler from this location
     _C.MODEL.GAMBLER_HEAD.WEIGHTS = "./output/gambler/focal_plus_gambler/gambler_models/model_0042749.pth"
     # number of iterations the gambler is trained before the detector is trained
@@ -34,6 +36,8 @@ def add_gambler_config(cfg):
     _C.MODEL.GAMBLER_HEAD.GAMBLER_TEMPERATURE = 0.03
     # classification loss used in the gambler can be either "sigmoid" or "focal"
     _C.MODEL.GAMBLER_HEAD.GAMBLER_LOSS_MODE = "focal"
+    # normalizing the weights of the gambler, turned off for sanity check that gambler is learning
+    _C.MODEL.GAMBLER_HEAD.NORMALIZE = True
     # The period (in terms of steps) for minibatch visualization at train time.
     # Set to 0 to disable.
     _C.MODEL.GAMBLER_HEAD.VIS_PERIOD = 300
