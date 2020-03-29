@@ -101,93 +101,105 @@ def normalize_to_01(input):
     return (input-_min)/(_max-_min)
 
 
-def visualize_training(gt_classes, y, betting_map, input_images, storage):
-    device = torch.device(global_cfg.MODEL.DEVICE)
-    anchor_scales = global_cfg.MODEL.ANCHOR_GENERATOR.SIZES
+def find_max_location(tensor_in):
+    return (tensor_in == torch.ones_like(tensor_in) * tensor_in.max()).nonzero()
 
-    [n, _, w, h] = y.shape
 
-    y = torch.chunk(y, len(anchor_scales[0]), dim=1)  # todo hard coded scales #todo [0] is wrong
+def find_min_location(tensor_in):
+    return (tensor_in == torch.ones_like(tensor_in) * tensor_in.min()).nonzero()
+
+
+def prepare_loss_grid(loss, num_scales):
+    loss = torch.chunk(loss, num_scales, dim=1)  # todo hard coded scales
     y_list = []
-    # print("losses per scale: ")
-    for scale, _y in enumerate(y):
+    for scale, _y in enumerate(loss):
         # print(torch.sum(_y))
         # storage.put_scalar("loss_per_scale/" + str(scale), torch.sum(_y))
         y_list.append(make_grid(_y, nrow=2, pad_value=1))
-    # print("finished losses")
     loss_grid = torch.cat(y_list, dim=1)
+    return loss_grid
 
+
+def prepare_gt_grid(gt_classes, batch, num_scales, W, H, device):
     a = torch.ones(gt_classes.shape) * 0.5  # gray foreground by default
     a[gt_classes == -1] = 1  # white unmatched
     a[gt_classes == 80] = 0  # black background
     gt_classes = a.to(device)
-
-    gt = gt_classes.reshape(n, w, h, -1, 1) #(n, w, h, anchors, c)
-
-    gt = torch.chunk(gt, len(anchor_scales[0]), dim=3)  # todo hard coded scales #todo [0] is wrong
+    gt = gt_classes.reshape(batch, W, H, -1, 1)  # (n, w, h, anchors, c)
+    gt = torch.chunk(gt, num_scales, dim=3)  # todo hard coded scales #todo [0] is wrong /GAMBLER_OUT_CHANNELS is also wrong
     gt_list = []
     for _gt in gt:
         _gt = _gt.squeeze(dim=3)
         _gt = _gt.permute(0, 3, 1, 2)
         gt_list.append(make_grid(_gt, nrow=2, pad_value=1))
-    gt_scales = torch.cat(gt_list, dim=1)
+    gt_grid = torch.cat(gt_list, dim=1)
+    return gt_grid
 
-    # save_image(gt / 1., os.path.join(global_cfg.OUTPUT_DIR, str(self.iter) + "iter_gt.jpg"), nrow=2)
 
+def prepare_input_images(input_images, num_scales, device):
     pixel_mean = torch.Tensor(global_cfg.MODEL.PIXEL_MEAN).to(device).view(3, 1, 1)
     pixel_std = torch.Tensor(global_cfg.MODEL.PIXEL_STD).to(device).view(3, 1, 1)
-    denormalizer = lambda x: (x * pixel_std) + pixel_mean
+    denormalizer = lambda x: (x * pixel_std) + pixel_mean  # todo maybe normalized image is better
     input_images = denormalizer(input_images)
+    input_grid = make_grid(input_images / 255., nrow=2)
+    if num_scales > 1:
+        input_grid = input_grid.repeat(1, num_scales, 1)
+    return input_grid
 
-    input_grid = make_grid(input_images/255., nrow=2)
-    # save_image(input_images/255., global_cfg.OUTPUT_DIR + "/test.jpg", nrow=2)
-    # betting_map = betting_map[:, 0].reshape(n, w, h, -1,1)  # (n,w,h,a,c) #todo if weights are only per anchor and not per class
-    # bm = torch.chunk(betting_map, global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUT_CHANNELS, dim=3)
-    bm = torch.chunk(betting_map, global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUT_CHANNELS, dim=1) #todo hard coded scales
+
+def prepare_betting_map(betting_map, batch, num_scales,  W, H, input_grid=None, heatmap_mode=True):
+    # betting_map = normalize_to_01(betting_map)
+    # betting_map = betting_map * 27500
+    betting_map = betting_map[:, 0].reshape(batch, W, H, -1,1)  # (n,w,h,a,c) #todo if weights are only per anchor and not per class
+    bm = torch.chunk(betting_map, num_scales, dim=3) #todo hardcoded scales
     bm_list = []
-
-    # heatmap = torch.empty(1, 252, 271).uniform_(0, 1)
-    # heatmap = torch.cat((heatmap, torch.zeros(2, 252, 271)))
-    #
-    # import torchvision.transforms.functional as TF
-    # img = TF.to_pil_image(x)  # assuming your image in x
-    # h_img = TF.to_pil_image(heatmap)
-    #
-    # res = Image.blend(img, h_img, 0.5)
-
-    # print("betting map: ")
     for scale, _bm in enumerate(bm):
         # Create heatmap image in red channel
         # storage.put_scalar("weights_per_scale/" + str(scale), torch.sum(_bm))
-        # _bm = _bm.squeeze(dim=3)
-        # _bm = _bm.permute(0, 3, 1, 2)
-        g_channel = torch.zeros_like(_bm)
-        b_channel = torch.zeros_like(_bm)
-        _bm = torch.cat((_bm, g_channel, b_channel), dim=1)
+        _bm = _bm.squeeze(dim=3)
+        _bm = _bm.permute(0, 3, 1, 2)
+        if heatmap_mode is True:
+            g_channel = torch.zeros_like(_bm)
+            b_channel = torch.zeros_like(_bm)
+            _bm = torch.cat((_bm, g_channel, b_channel), dim=1)
         bm_list.append(make_grid(_bm, nrow=2))
-
     betting_map_grid = torch.cat(bm_list, dim=1)
-    print("___________________________________________________________________________________________________________________")
-    print("sum of all scales: ", torch.sum(betting_map_grid), "max bets among all scales: ", torch.max(betting_map_grid))
-    print("loss max location: ‌", loss_grid.argmax(), "weight max location: ", betting_map_grid.argmax())
-    print("___________________________________________________________________________________________________________________")
-    cm = plt.get_cmap('jet')
-    betting_map_grid_heatmap = cm(betting_map_grid[0, :, :].detach().cpu())
-    print(betting_map_grid_heatmap.max(), input_grid.max(), betting_map_grid_heatmap.transpose(2, 0, 1)[:3, :, :].max())
-    if global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUT_CHANNELS > 1:
-        input_grid = input_grid.repeat(1, global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUT_CHANNELS, 1)
-        blended = betting_map_grid_heatmap.transpose(2, 0, 1)[:3, :, :] * 0.5 + input_grid.cpu().numpy() * 0.5
-        print(blended.max())
-    else:
-        blended = betting_map_grid_heatmap.transpose(2, 0, 1)[:3, :, :] * 0.5 + input_grid.cpu().numpy() * 0.5
 
-    # blended = betting_map_grid_heatmap.transpose(2, 0, 1)[:3, :, :] * 0.5 + input_grid.cpu().numpy() * 0.5
-    # storage.put_image("blended", blended)
-    # storage.put_image("concat", np.concatenate((blended, loss_grid.cpu().numpy(), input_grid.cpu().numpy(), gt_scales.cpu().numpy()), axis=2))
-    # loss_grid[loss_grid > 1] = 16.0
-    vis = np.concatenate((blended, (normalize_to_01(loss_grid)).cpu().numpy(), input_grid.cpu().numpy(), gt_scales.cpu().numpy()), axis=2)
+    if input_grid is not None and heatmap_mode is True:
+    # blend the heatmap with input
+        cm = plt.get_cmap('jet')
+        betting_map_grid_heatmap = cm(betting_map_grid[0, :, :].detach().cpu())
+        blended = betting_map_grid_heatmap.transpose(2, 0, 1)[:3, :, :] * 0.5 + input_grid.cpu().numpy() * 0.5
+        return blended
+    if heatmap_mode is True:
+        cm = plt.get_cmap('jet')
+        betting_map_grid_heatmap = cm(betting_map_grid[0, :, :].detach().cpu())
+        heatmap = betting_map_grid_heatmap.transpose(2, 0, 1)[:3, :, :]
+        return heatmap
+
+    return betting_map_grid.cpu().numpy()
+
+
+def visualize_training(gt_classes, loss, betting_map, input_images, storage):
+    device = torch.device(global_cfg.MODEL.DEVICE)
+    anchor_scales = global_cfg.MODEL.ANCHOR_GENERATOR.SIZES
+    [n, _, w, h] = loss.shape
+
+    # Prepare loss *****************************************************************************************************
+    loss_grid = prepare_loss_grid(loss, len(anchor_scales[0]))
+
+    # Prepare ground truth *********************************************************************************************
+    gt_grid = prepare_gt_grid(gt_classes, n, len(anchor_scales[0]), w, h, device)
+
+    # Prepare input images *********************************************************************************************
+    input_grid = prepare_input_images(input_images, len(anchor_scales[0]), device)
+
+    # Prepare betting map **********************************************************************************************
+    bets_and_input = prepare_betting_map(betting_map, n, len(anchor_scales[0]), w, h, input_grid=None, heatmap_mode=False)
+
+    vis = np.concatenate((bets_and_input, (normalize_to_01(loss_grid)).cpu().numpy(), input_grid.cpu().numpy(), gt_grid.cpu().numpy()), axis=2)
     storage.put_image("all", vis)
-    vis = vis.transpose(1,2,0 )# numpy images are (W,H,C)
+    vis = vis.transpose(1, 2, 0)  # numpy images are (W,H,C)
     return vis
 
 
@@ -279,6 +291,19 @@ class GANTrainer(TrainerBase):
         self.gambler_outside_lambda = cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTSIDE_LAMBDA
         self.vis_period = cfg.MODEL.GAMBLER_HEAD.VIS_PERIOD
         self.device = self.cfg.MODEL.DEVICE
+
+    def set_requires_grad(self, nets, requires_grad=False):
+        """Set requires_grad=False for all the networks to avoid unnecessary computations
+        Parameters:
+            nets (network list)   -- a list of networks
+            requires_grad (bool)  -- whether the networks require gradients or not
+        """
+        if not isinstance(nets, list):
+            nets = [nets]
+        for net in nets:
+            if net is not None:
+                for param in net.parameters():
+                    param.requires_grad = requires_grad
 
     @classmethod
     def build_optimizer_gambler(cls, cfg, gambler_model) -> torch.optim.Optimizer:
@@ -790,8 +815,8 @@ class GANTrainer(TrainerBase):
             [N, C] = weights.shape  # C==1
             # print(weights.shape)
             # print("sum: " , weights.sum(), "max: ", weights.max(), "median: ", weights.median())
-            weights = weights.expand(N, num_classes)
-            # weights = weights.repeat(1, num_classes)
+            # weights = weights.expand(N, num_classes)
+            weights = weights.repeat(1, num_classes)
             # print("sum: ", weights.sum(), "max: ", weights.max(), "median: ", weights.median())
 
 
@@ -808,7 +833,7 @@ class GANTrainer(TrainerBase):
         gt_classes_target[foreground_idxs, gt_classes[foreground_idxs]] = 1
 
         # logits loss
-        loss_before_weighting, loss_cls = GANTrainer.sigmoid_loss(
+        loss_before_weighting, gambler_loss = GANTrainer.sigmoid_loss(
             pred_class_logits[valid_idxs],
             gt_classes_target[valid_idxs],
             weights[valid_idxs],  # -1 labels are ignored for calculating the loss
@@ -817,18 +842,17 @@ class GANTrainer(TrainerBase):
             gamma=global_cfg.MODEL.RETINANET.FOCAL_LOSS_GAMMA,
             reduction="sum")
         # print("sum: ", weights.sum(), "max: ", weights.max(), "median: ", weights.median())
-        loss_cls = loss_cls / max(1, num_foreground)
+        # print("num foreground: ", num_foreground)
+        # gambler_loss = gambler_loss / max(1, num_foreground)
 
         y = torch.zeros((list(valid_idxs.shape)[0], 80)).to(global_cfg.MODEL.DEVICE)
         y[valid_idxs, :] = loss_before_weighting.clone().detach()
         y = y.reshape(n, w, h, num_classes, -1) #(n,w,h,c,a)
         y = y.permute(0, 3, 4, 1, 2)
         y = y.sum(dim=[1], keepdim=False) # aggregate the loss over classes but not anchor scales
-        # y = y.reshape(n, -1, w, h)
         loss_before_weighting = loss_before_weighting.sum()
         loss_before_weighting = loss_before_weighting / max(1, num_foreground)
-        # print(weights.shape)
-        return y, loss_before_weighting, loss_cls, weights.data
+        return y, loss_before_weighting, gambler_loss, weights.data
 
     @staticmethod
     def sigmoid_loss(inputs, targets, weights, mode: str = "sigmoid", alpha: float = -1, gamma: float = 2, reduction: str = "none"):
@@ -872,15 +896,21 @@ class GANTrainer(TrainerBase):
             logging.error("No mode it selected for the retinanet loss!!")
             loss = None
 
-        def find_max_location(tensor_in):
-            return (tensor_in == torch.ones_like(tensor_in) * tensor_in.max()).nonzero()
-
         sigmoid_loss_before_weighting = loss.clone().detach()
-        # print("______________________________________________________________________________________________________")
-        # print("loss shape: ‌", loss.shape, "weight shape: ", weights.shape)
-        # print(''''"loss max location: ‌", find_max_location(loss), "loss sum (over classes) max location", find_max_location(loss.sum(dim=1)),
-        #       "weight max location: ", find_max_location(weights),''' "loss max value: ", loss.max(), "loss sum max: ",
-        #       loss.sum(dim=1).max(), "weight max value: ", weights.max())
+        print("______________________________________________________________________________________________________")
+        # print("loss max value: ", loss.max(), "loss sum max: ",loss.sum(dim=1).max())
+
+        print("loss shape: ‌", loss.shape, "weight shape: ", weights.shape)
+        print("loss max location: ‌", find_max_location(loss), "loss sum (over classes) max location", find_max_location(loss.sum(dim=1)),
+              loss.sum(dim=1).max(),
+              "weight max location: ", find_max_location(weights), "loss max value: ", loss.max(), "loss sum max: ",
+              loss.sum(dim=1).max(), "weight max value: ", weights.max())
+        s = get_event_storage()
+        if s.iter == 2:
+            # print("loss where weight is max: ", loss[432,   0], loss[433,   0], loss[434,   0])
+            # print("loss where weight is max: ", loss[1773, 0], loss[1774,    1], loss[1775,    1])
+            print("loss where weight is max: ", loss[2049, 0], loss[2050, 1], loss[2051, 1])
+            print("meli")
 
         loss = -weights * loss
 
@@ -917,8 +947,8 @@ class GANTrainer(TrainerBase):
         gambler_input = torch.cat((input_images, scaled_prob), dim=1)
 
         if self.iter_G < self.max_iter_gambler:
-            self.detection_model.eval()
-            self.gambler_model.train()
+            # self.detection_model.eval()
+            # self.gambler_model.train()
 
             logger.info(f"Iteration {self.iter} in Gambler")
             betting_map = self.gambler_model(gambler_input)
@@ -926,10 +956,14 @@ class GANTrainer(TrainerBase):
 
             if self.vis_period > 0: #todo hooks
                 storage = get_event_storage()
-                storage.put_scalar("gambler_bets/msum", torch.sum(betting_map))
+                storage.put_scalar("gambler_bets/sum", torch.sum(betting_map))
                 storage.put_scalar("gambler_bets/max", torch.max(betting_map))
                 storage.put_scalar("gambler_bets/mean", torch.mean(betting_map))
                 storage.put_scalar("gambler_bets/median", torch.median(betting_map))
+                storage.put_scalar("visualized weights/sum", torch.sum(weights))
+                storage.put_scalar("visualized weights/max", torch.max(weights))
+                storage.put_scalar("visualized weights/mean", torch.mean(weights))
+                storage.put_scalar("visualized weights/median", torch.median(weights))
                 if storage.iter % self.vis_period == 0:
                     visualize_training(gt_classes, y, weights, input_images, storage)
 
@@ -950,8 +984,8 @@ class GANTrainer(TrainerBase):
             #     print(param.requires_grad)
             # print(self.gambler_model.module.outc.conv.weight.grad)
             self.gambler_optimizer.step()
-            self.detection_model.train()
-            self.gambler_model.train()
+            # self.detection_model.train()
+            # self.gambler_model.train()
 
             self.iter_G += 1
             if self.iter_G == self.max_iter_gambler:

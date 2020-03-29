@@ -220,7 +220,7 @@ def inference_and_visualize(detector, gambler, data_loader=None, mode="dataloade
                     betting_map = gambler(gambler_input)
 
                     y, loss_before_weighting, loss_gambler, weights = GANTrainer.sigmoid_gambler_loss(generated_output['pred_class_logits'], betting_map, gt_classes, normalize_w=global_cfg.MODEL.GAMBLER_HEAD.NORMALIZE)
-                    vis = visualize_training(gt_classes, y, betting_map, input_images, storage)
+                    vis = visualize_training(gt_classes, y, weights, input_images, storage)
                     output(vis, os.path.join(global_cfg.OUTPUT_DIR, "images", str(idx) + ".jpg"))
                     # for writer in periodic_writer._writers:
                     #     writer.write()
