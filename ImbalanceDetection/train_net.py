@@ -52,6 +52,13 @@ def permute_to_N_HWA_K(tensor, K):
     return tensor
 
 
+def reverse_permute_to_N_HWA_K(tensor, N, H, W, K):
+    tensor = tensor.reshape(N, H, W, -1, K)  # Size=(N,H,W,A,K)
+    tensor = tensor.permute(0, 3, 4, 1, 2)
+    tensor = tensor.view(N, -1, H, W)
+    return tensor
+
+
 def permute_all_cls_to_N_HWA_K_and_concat(box_cls, num_classes=80):
     """
     Rearrange the tensor layout from the network output, i.e.:
@@ -69,8 +76,14 @@ def permute_all_cls_to_N_HWA_K_and_concat(box_cls, num_classes=80):
     # take into account the way the labels were generated (with all feature maps
     # being concatenated as well)
     box_cls = cat(box_cls_flattened, dim=1).reshape(-1, num_classes)
-    # box_delta = cat(box_delta_flattened, dim=1).reshape(-1, 4)
     return box_cls
+
+
+def reverse_permute_all_cls_to_N_HWA_K_and_concat(tensor, num_fpn_layers, N, H, W, num_classes=80):
+    tensor = tensor.reshape(N, -1, num_classes) # (n,h*w*a,k)
+    tensor = torch.chunk(tensor, num_fpn_layers, dim=1)  # todo not sure about this
+    tensor_prime = [reverse_permute_to_N_HWA_K(x, N, H, W, num_classes) for x in tensor]
+    return tensor_prime
 
 
 def permute_all_weights_to_N_HWA_K_and_concat(weights, num_classes=80, normalize_w= False):
@@ -787,7 +800,18 @@ class GANTrainer(TrainerBase):
 
     @staticmethod
     def sigmoid_gambler_loss(pred_class_logits, weights, gt_classes, normalize_w=False, detach_pred=False):
+        '''
 
+        Args:
+            pred_class_logits: list of tensors, each tensor is [batch, #class_categories * anchors per location, w, h]
+            weights: [batch, #anchors per location/#classes/ classes*anchors per location, w, h]
+            gt_classes: [batch, #all_anchors = w * h * anchors per location]
+            normalize_w:
+            detach_pred:
+
+        Returns:
+
+        '''
         [n,ca,w,h] = pred_class_logits[0].shape
         if detach_pred is True:
             pred_class_logits = [p.detach() for p in pred_class_logits]
@@ -818,7 +842,7 @@ class GANTrainer(TrainerBase):
         pred_class_logits = permute_all_cls_to_N_HWA_K_and_concat(
             pred_class_logits, num_classes
         )  # Shapes: (N x R, K) and (N x R, 4), respectively.
-
+        import ipdb; ipdb.set_trace()
         gt_classes = gt_classes.flatten()
         valid_idxs = gt_classes >= 0
         foreground_idxs = (gt_classes >= 0) & (gt_classes != num_classes)
