@@ -796,8 +796,6 @@ class GANTrainer(TrainerBase):
         # prepare weights
         weights = permute_all_weights_to_N_HWA_K_and_concat([weights], 1, normalize_w) #todo hardcoded 3: scales
 
-        #todo add if for different output formats
-        # 1 weight for all scales of an anchor
         # per location weights (neither per class nor per anchor)
         if global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_INPUT == "BCHW" and global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "B1HW":
             [N, C] = weights.shape #C==1
@@ -813,11 +811,8 @@ class GANTrainer(TrainerBase):
         # per anchor weights, aggregated class weights
         elif global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_INPUT == "BCAHW" and global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "BAHW":
             [N, C] = weights.shape  # C==1
-            # print(weights.shape)
-            # print("sum: " , weights.sum(), "max: ", weights.max(), "median: ", weights.median())
             # weights = weights.expand(N, num_classes)
             weights = weights.repeat(1, num_classes)
-            # print("sum: ", weights.sum(), "max: ", weights.max(), "median: ", weights.median())
 
 
         pred_class_logits = permute_all_cls_to_N_HWA_K_and_concat(
@@ -841,8 +836,6 @@ class GANTrainer(TrainerBase):
             alpha=global_cfg.MODEL.RETINANET.FOCAL_LOSS_ALPHA,
             gamma=global_cfg.MODEL.RETINANET.FOCAL_LOSS_GAMMA,
             reduction="sum")
-        # print("sum: ", weights.sum(), "max: ", weights.max(), "median: ", weights.median())
-        # print("num foreground: ", num_foreground)
         # gambler_loss = gambler_loss / max(1, num_foreground)
 
         y = torch.zeros((list(valid_idxs.shape)[0], 80)).to(global_cfg.MODEL.DEVICE)
@@ -897,20 +890,21 @@ class GANTrainer(TrainerBase):
             loss = None
 
         sigmoid_loss_before_weighting = loss.clone().detach()
-        print("______________________________________________________________________________________________________")
-        # print("loss max value: ", loss.max(), "loss sum max: ",loss.sum(dim=1).max())
-
-        print("loss shape: ‌", loss.shape, "weight shape: ", weights.shape)
-        print("loss max location: ‌", find_max_location(loss), "loss sum (over classes) max location", find_max_location(loss.sum(dim=1)),
-              loss.sum(dim=1).max(),
-              "weight max location: ", find_max_location(weights), "loss max value: ", loss.max(), "loss sum max: ",
-              loss.sum(dim=1).max(), "weight max value: ", weights.max())
-        s = get_event_storage()
-        if s.iter == 2:
-            # print("loss where weight is max: ", loss[432,   0], loss[433,   0], loss[434,   0])
-            # print("loss where weight is max: ", loss[1773, 0], loss[1774,    1], loss[1775,    1])
-            print("loss where weight is max: ", loss[2049, 0], loss[2050, 1], loss[2051, 1])
-            print("meli")
+        # print("______________________________________________________________________________________________________")
+        # print("loss shape: ‌", loss.shape, "weight shape: ", weights.shape)
+        # print("loss max location: ‌", find_max_location(loss), "loss sum (over classes) max location", find_max_location(loss.sum(dim=1)),
+        #       loss.sum(dim=1).max(),
+        #       "weight max location: ", find_max_location(weights), "loss max value: ", loss.max(), "loss sum max: ",
+        #       loss.sum(dim=1).max(), "weight max value: ", weights.max())
+        # s = get_event_storage()
+        # if s.iter==2:
+        #     import csv
+        #     with open(os.path.join(global_cfg.OUTPUT_DIR, "weights.csv"), "w") as my_csv:
+        #         csvWriter = csv.writer(my_csv, delimiter=',')
+        #         csvWriter.writerows(weights.cpu().numpy())
+        # with open(os.path.join(global_cfg.OUTPUT_DIR, "losses.csv"), "w") as my_csv:
+        #     csvWriter = csv.writer(my_csv, delimiter=',')
+        #     csvWriter.writerows(loss.sum(dim=1, keepdim=True).cpu().numpy())
 
         loss = -weights * loss
 
