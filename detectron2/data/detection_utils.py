@@ -408,7 +408,11 @@ def build_transform_gen(cfg, is_train):
         )
 
     logger = logging.getLogger(__name__)
-    tfm_gens = [T.ResizeShortestEdge(min_size, max_size, sample_style)]
+    if cfg.INPUT.RESIZING:
+        tfm_gens = [T.ResizeShortestEdge(min_size, max_size, sample_style)]
+    elif cfg.INPUT.RESIZING is False:
+        tfm_gens = [T.Resize(shape=(640, 640))]
+
     if is_train:
         if cfg.INPUT.RANDOM_FLIPPING:
             tfm_gens.append(T.RandomFlip())

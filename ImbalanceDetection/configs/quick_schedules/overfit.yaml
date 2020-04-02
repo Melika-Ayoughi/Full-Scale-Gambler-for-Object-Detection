@@ -17,7 +17,7 @@ MODEL:
     GAMBLER_LOSS_MODE: "focal"
     GAMBLER_OUT_CHANNELS: 1
     GAMBLER_IN_CHANNELS: 243 #3*80+3
-    BASE_LR: 0.001
+    BASE_LR: 0.01
     NORMALIZE: True
 #    LOAD_PRETRAINED_GAMBLER: True
 #    WEIGHTS: "./output/gambler/11scales_fix_detector_no_temperature_lambda27500/gambler_models/model_final.pth"
@@ -43,6 +43,7 @@ INPUT:
   MIN_SIZE_TEST: 640
   MIN_SIZE_TRAIN: (640, )
   RANDOM_FLIPPING: False
+  RESIZING: False
 DATALOADER:
     ASPECT_RATIO_GROUPING: False
-OUTPUT_DIR: "./output/gambler/reshape_loss_fix_weights"
+OUTPUT_DIR: "./output/gambler/overfit_gambler_lr01"

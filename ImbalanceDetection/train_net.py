@@ -921,10 +921,10 @@ class GANTrainer(TrainerBase):
             logging.error("No mode it selected for the retinanet loss!!")
             loss = None
         # ignore the invalid ids in loss
-        valid_loss = torch.zeros_like(loss)
+        valid_loss = torch.zeros_like(loss) #todo: backprop
         valid_loss[valid_idxs, :] = loss[valid_idxs, :]
 
-        loss = reverse_permute_all_cls_to_N_HWA_K_and_concat(valid_loss, 1, N, H, W, global_cfg.MODEL.RETINANET.NUM_CLASSES) #NAKHW_loss
+        loss = reverse_permute_all_cls_to_N_HWA_K_and_concat(valid_loss, 1, N, H, W, global_cfg.MODEL.RETINANET.NUM_CLASSES) #N,AK,H,W_loss
 
         if global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "B1HW":
             loss = [torch.sum(l, dim=[1], keepdim=True) for l in loss]  # aggregate over classes and anchors
@@ -939,18 +939,17 @@ class GANTrainer(TrainerBase):
             loss = loss # do nothing
 
 
-        # print("______________________________________________________________________________________________________")
-        # print("loss shape: ‌", loss.shape, "weight shape: ", weights.shape)
-        # print("loss max location: ‌", find_max_location(loss), "loss sum (over classes) max location", find_max_location(loss.sum(dim=1)),
-        #       loss.sum(dim=1).max(),
-        #       "weight max location: ", find_max_location(weights), "loss max value: ", loss.max(), "loss sum max: ",
-        #       loss.sum(dim=1).max(), "weight max value: ", weights.max())
-        # s = get_event_storage()
-        # if s.iter==2:
-        #     import csv
-        #     with open(os.path.join(global_cfg.OUTPUT_DIR, "weights.csv"), "w") as my_csv:
-        #         csvWriter = csv.writer(my_csv, delimiter=',')
-        #         csvWriter.writerows(weights.cpu().numpy())
+        print("______________________________________________________________________________________________________")
+        print("loss shape: ‌", loss.shape, "weight shape: ", weights.shape)
+        s = get_event_storage()
+        with open(os.path.join(global_cfg.OUTPUT_DIR, "weights‌.csv"), "a") as my_csv:
+            my_csv.write(f"iteration: {str(s.iter)}, max weight: {weights.max()},‌ max loss: {loss.max()}, "
+                         f"loss where weight is max: {loss[weights.argmax()].item()}, weight where loss is max: {weights[loss.argmax()].item()},"
+                         f"weight argmax: {weights.argmax()}, loss argmax: {loss.argmax()},")
+        # import csv
+        # csvWriter = csv.writer(my_csv, delimiter=',')
+        # csvWriter.writerows(weights.cpu().numpy())
+
         # with open(os.path.join(global_cfg.OUTPUT_DIR, "losses.csv"), "w") as my_csv:
         #     csvWriter = csv.writer(my_csv, delimiter=',')
         #     csvWriter.writerows(loss.sum(dim=1, keepdim=True).cpu().numpy())
@@ -961,6 +960,9 @@ class GANTrainer(TrainerBase):
             loss = loss.mean()
         elif reduction == "sum":
             loss = loss.sum()
+
+        with open(os.path.join(global_cfg.OUTPUT_DIR, "weights‌.csv"), "a") as my_csv:
+            my_csv.write(f"sum loss after weighting: {loss}\n")
 
         return NAKHW_loss, loss
 

@@ -78,7 +78,10 @@ _C.INPUT.FORMAT = "BGR"
 # The ground truth mask format that the model will use.
 # Mask R-CNN supports either "polygon" or "bitmask" as ground truth.
 _C.INPUT.MASK_FORMAT = "polygon"  # alternative: "bitmask"
+# added for overfitting experiment, turns random flipping on and off
 _C.INPUT.RANDOM_FLIPPING = True
+# added for overfitting experiment, turns aspect ratio resizing on and off
+_C.INPUT.RESIZING = True
 
 # -----------------------------------------------------------------------------
 # Dataset
