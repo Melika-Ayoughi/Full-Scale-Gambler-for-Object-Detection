@@ -45,4 +45,4 @@ INPUT:
   RANDOM_FLIPPING: False
 DATALOADER:
     ASPECT_RATIO_GROUPING: False
-OUTPUT_DIR: "./output/gambler/debug"
+OUTPUT_DIR: "./output/gambler/reshape_loss_fix_weights"

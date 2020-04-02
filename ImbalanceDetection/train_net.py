@@ -196,6 +196,9 @@ def prepare_betting_map(betting_map, batch, num_scales,  W, H, input_grid=None, 
 def visualize_training(gt_classes, loss, betting_map, input_images, storage):
     device = torch.device(global_cfg.MODEL.DEVICE)
     anchor_scales = global_cfg.MODEL.ANCHOR_GENERATOR.SIZES
+    if len(loss) > 1:
+        raise Exception("The code still does not supposrt the full FPN layers!")
+    loss = loss[0] #todo: change for multiple fpn layers
     [n, _, w, h] = loss.shape
 
     # Prepare loss *****************************************************************************************************
@@ -205,12 +208,12 @@ def visualize_training(gt_classes, loss, betting_map, input_images, storage):
     gt_grid = prepare_gt_grid(gt_classes, n, len(anchor_scales[0]), w, h, device)
 
     # Prepare input images *********************************************************************************************
-    input_grid = prepare_input_images(input_images, len(anchor_scales[0]), device)
+    input_grid = prepare_input_images(input_images, 1, device)
 
     # Prepare betting map **********************************************************************************************
-    bets_and_input = prepare_betting_map(betting_map, n, len(anchor_scales[0]), w, h, input_grid=None, heatmap_mode=False)
+    bets_and_input = prepare_betting_map(betting_map, n, len(anchor_scales[0]), w, h, input_grid=input_grid, heatmap_mode=False)
 
-    vis = np.concatenate((bets_and_input, (normalize_to_01(loss_grid)).cpu().numpy(), input_grid.cpu().numpy(), gt_grid.cpu().numpy()), axis=2)
+    vis = np.concatenate((bets_and_input, (normalize_to_01(loss_grid)).cpu().numpy(), input_grid.cpu().numpy()), axis=2) #todo: visualize gt as well
     storage.put_image("all", vis)
     vis = vis.transpose(1, 2, 0)  # numpy images are (W,H,C)
     return vis
@@ -812,7 +815,7 @@ class GANTrainer(TrainerBase):
         Returns:
 
         '''
-        [n,ca,w,h] = pred_class_logits[0].shape
+        [n,ca,h,w] = pred_class_logits[0].shape
         if detach_pred is True:
             pred_class_logits = [p.detach() for p in pred_class_logits]
 
@@ -820,30 +823,29 @@ class GANTrainer(TrainerBase):
         # prepare weights
         weights = permute_all_weights_to_N_HWA_K_and_concat([weights], 1, normalize_w) #todo hardcoded 3: scales
 
-        # per location weights (neither per class nor per anchor)
-        if global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_INPUT == "BCHW" and global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "B1HW":
-            [N, C] = weights.shape #C==1
-            # weights = weights.expand(N, num_classes)
-            weights = weights.repeat(1, num_classes)
-        # aggregated anchor weights
-        elif global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_INPUT == "BCAHW" and global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "B1HW":
-            anchor_scales = global_cfg.MODEL.ANCHOR_GENERATOR.SIZES
-            weights = weights.repeat_interleave(len(anchor_scales[0]), dim=0)  # todo hardcoded 3: scales [0] is wrong
-            [N, C] = weights.shape #C==1
-            # weights = weights.expand(N, num_classes)
-            weights = weights.repeat(1, num_classes)
-        # per anchor weights, aggregated class weights
-        elif global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_INPUT == "BCAHW" and global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "BAHW":
-            [N, C] = weights.shape  # C==1
-            # weights = weights.expand(N, num_classes)
-            weights = weights.repeat(1, num_classes)
+        # # per location weights (neither per class nor per anchor)
+        # if global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_INPUT == "BCHW" and global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "B1HW":
+        #     [N, C] = weights.shape #C==1
+        #     # weights = weights.expand(N, num_classes)
+        #     weights = weights.repeat(1, num_classes)
+        # # aggregated anchor weights
+        # elif global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_INPUT == "BCAHW" and global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "B1HW":
+        #     anchor_scales = global_cfg.MODEL.ANCHOR_GENERATOR.SIZES
+        #     weights = weights.repeat_interleave(len(anchor_scales[0]), dim=0)  # todo hardcoded 3: scales [0] is wrong
+        #     [N, C] = weights.shape #C==1
+        #     # weights = weights.expand(N, num_classes)
+        #     weights = weights.repeat(1, num_classes)
+        # # per anchor weights, aggregated class weights
+        # elif global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_INPUT == "BCAHW" and global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "BAHW":
+        #     [N, C] = weights.shape  # C==1
+        #     # weights = weights.expand(N, num_classes)
+        #     weights = weights.repeat(1, num_classes)
 
 
         pred_class_logits = permute_all_cls_to_N_HWA_K_and_concat(
             pred_class_logits, num_classes
         )  # Shapes: (N x R, K) and (N x R, 4), respectively.
-        import ipdb; ipdb.set_trace()
-        gt_classes = gt_classes.flatten()
+        gt_classes = gt_classes.flatten() #todo next: change the shape of gt to the proper shape
         valid_idxs = gt_classes >= 0
         foreground_idxs = (gt_classes >= 0) & (gt_classes != num_classes)
         num_foreground = foreground_idxs.sum()
@@ -852,27 +854,32 @@ class GANTrainer(TrainerBase):
         gt_classes_target[foreground_idxs, gt_classes[foreground_idxs]] = 1
 
         # logits loss
-        loss_before_weighting, gambler_loss = GANTrainer.sigmoid_loss(
-            pred_class_logits[valid_idxs],
-            gt_classes_target[valid_idxs],
-            weights[valid_idxs],  # -1 labels are ignored for calculating the loss
+        NAKHW_loss, gambler_loss = GANTrainer.sigmoid_loss(
+            pred_class_logits,
+            gt_classes_target,
+            weights,
+            valid_idxs, # -1 labels are ignored for calculating the loss
+            n,
+            h,
+            w,
             mode=global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_LOSS_MODE,
             alpha=global_cfg.MODEL.RETINANET.FOCAL_LOSS_ALPHA,
             gamma=global_cfg.MODEL.RETINANET.FOCAL_LOSS_GAMMA,
             reduction="sum")
         # gambler_loss = gambler_loss / max(1, num_foreground)
 
-        y = torch.zeros((list(valid_idxs.shape)[0], 80)).to(global_cfg.MODEL.DEVICE)
-        y[valid_idxs, :] = loss_before_weighting.clone().detach()
-        y = y.reshape(n, w, h, num_classes, -1) #(n,w,h,c,a)
-        y = y.permute(0, 3, 4, 1, 2)
-        y = y.sum(dim=[1], keepdim=False) # aggregate the loss over classes but not anchor scales
-        loss_before_weighting = loss_before_weighting.sum()
-        loss_before_weighting = loss_before_weighting / max(1, num_foreground)
-        return y, loss_before_weighting, gambler_loss, weights.data
+        # y = torch.zeros((list(valid_idxs.shape)[0], 80)).to(global_cfg.MODEL.DEVICE)
+        # y[valid_idxs, :] = loss_before_weighting.clone().detach()
+        # y = y.reshape(n, h, w, num_classes, -1) #(n,w,h,c,a) #todo: wrong -1, num_classes
+        # y = y.permute(0, 3, 4, 1, 2)
+        # y = y.sum(dim=[1], keepdim=False) # aggregate the loss over classes but not anchor scales
+        # loss_before_weighting = loss_before_weighting.sum()
+        # loss_before_weighting = loss_before_weighting / max(1, num_foreground)
+        loss_before_weighting = [loss.sum() for loss in NAKHW_loss]
+        return NAKHW_loss, sum(loss_before_weighting) / max(1, num_foreground), gambler_loss, weights.data
 
     @staticmethod
-    def sigmoid_loss(inputs, targets, weights, mode: str = "sigmoid", alpha: float = -1, gamma: float = 2, reduction: str = "none"):
+    def sigmoid_loss(inputs, targets, weights, valid_idxs, N, H, W, mode: str = "sigmoid", alpha: float = -1, gamma: float = 2, reduction: str = "none"):
         """
         Weighted sigmoid loss that could be like focal loss
         Args:
@@ -882,6 +889,7 @@ class GANTrainer(TrainerBase):
                      classification label for each element in inputs
                     (0 for the negative class and 1 for the positive class).
             weights: A float tensor, shape is dependent on config (N, 1, Hi, Wi) or (N, C, Hi, Wi)
+            valid_idxs: valid ids should be the same shape as the loss
             mode: (optional) A string that specifies the mode of this loss
                     'none': weighted bce loss
                     'focal': weighted focal loss
@@ -912,8 +920,25 @@ class GANTrainer(TrainerBase):
         else:
             logging.error("No mode it selected for the retinanet loss!!")
             loss = None
+        # ignore the invalid ids in loss
+        valid_loss = torch.zeros_like(loss)
+        valid_loss[valid_idxs, :] = loss[valid_idxs, :]
 
-        sigmoid_loss_before_weighting = loss.clone().detach()
+        loss = reverse_permute_all_cls_to_N_HWA_K_and_concat(valid_loss, 1, N, H, W, global_cfg.MODEL.RETINANET.NUM_CLASSES) #NAKHW_loss
+
+        if global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "B1HW":
+            loss = [torch.sum(l, dim=[1], keepdim=True) for l in loss]  # aggregate over classes and anchors
+            NAKHW_loss = [l.clone().detach() for l in loss]
+            loss = permute_all_cls_to_N_HWA_K_and_concat(loss, num_classes=1)
+            # loss = [torch.sum(l, dim=[1,2], keepdim=True) for l in loss] # aggregate over classes and anchors #todo seperate classes and anchors
+        elif global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "BCHW":
+            loss = [torch.sum(l, dim=[1], keepdim=True) for l in loss] # aggregate over anchors
+        elif global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "BAHW":
+            loss = [torch.sum(l, dim=[2], keepdim=True) for l in loss] # aggregate over classes
+        elif global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "BCAHW":
+            loss = loss # do nothing
+
+
         # print("______________________________________________________________________________________________________")
         # print("loss shape: ‌", loss.shape, "weight shape: ", weights.shape)
         # print("loss max location: ‌", find_max_location(loss), "loss sum (over classes) max location", find_max_location(loss.sum(dim=1)),
@@ -934,12 +959,10 @@ class GANTrainer(TrainerBase):
 
         if reduction == "mean":
             loss = loss.mean()
-            sigmoid_loss_before_weighting = sigmoid_loss_before_weighting.mean()
         elif reduction == "sum":
             loss = loss.sum()
-            # sigmoid_loss_before_weighting = sigmoid_loss_before_weighting.sum()
 
-        return sigmoid_loss_before_weighting, loss
+        return NAKHW_loss, loss
 
     def run_step(self):
         """
