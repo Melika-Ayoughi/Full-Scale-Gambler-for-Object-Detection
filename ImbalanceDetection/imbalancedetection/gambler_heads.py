@@ -2,7 +2,7 @@ import logging
 import torch
 from torch import nn
 from .build import GAMBLER_HEAD_REGISTRY
-from .modelling.unet import UNet
+from .modelling.unet import UNet, UnetGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +53,25 @@ class UnetGambler(UNet):
             out_channels = 200 * cfg.MODEL.ROI_HEADS.NUM_CLASSES # todo
         '''
         super().__init__(in_channels, out_channels, bilinear)
+        self.to(self.device)
+
+    def forward(self, input):
+        return super().forward(input)
+
+
+@GAMBLER_HEAD_REGISTRY.register()
+class UnetLaurence(UnetGenerator):
+    def __init__(self, cfg):
+        self.device = torch.device(cfg.MODEL.DEVICE)
+        in_channels = cfg.MODEL.GAMBLER_HEAD.GAMBLER_IN_CHANNELS
+        out_channels = cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUT_CHANNELS
+        num_downs = 2**6 #todo
+        ngf = 64 #todo??
+        norm_layer = nn.BatchNorm2d
+        use_dropout = False
+        kernel_size = 4
+        pool = False
+        super().__init__(in_channels, out_channels, num_downs, ngf=ngf, norm_layer=norm_layer, use_dropout=use_dropout, kernel_size=kernel_size, pool=pool)
         self.to(self.device)
 
     def forward(self, input):

@@ -8,6 +8,7 @@ MODEL:
   ANCHOR_GENERATOR:
     SIZES: !!python/object/apply:eval ["[[x, x * 2**(1.0/3), x * 2**(2.0/3)] for x in [64]]"]
   GAMBLER_HEAD:
+    NAME: "UnetLaurence"
     GAMBLER_ITERATIONS: 100
     DETECTOR_ITERATIONS: 0
     GAMBLER_OUTPUT: "B1HW" #"B1HW"
@@ -46,4 +47,4 @@ INPUT:
   RESIZING: False
 DATALOADER:
     ASPECT_RATIO_GROUPING: False
-OUTPUT_DIR: "./output/gambler/overfit_gambler_lr01"
+OUTPUT_DIR: "./output/gambler/debug"
