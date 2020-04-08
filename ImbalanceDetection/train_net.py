@@ -543,7 +543,10 @@ class GANTrainer(TrainerBase):
                     results[dataset_name] = {}
                     continue
             inference_and_visualize(detector, gambler, train_data_loader, mode)
-            results_i = inference_on_dataset(detector, test_data_loader, evaluator)
+
+            from detectron2.utils.events import EventStorage
+            with EventStorage(0) as storage:
+                results_i = inference_on_dataset(detector, test_data_loader, evaluator)
             results[dataset_name] = results_i
             if comm.is_main_process():
                 assert isinstance(

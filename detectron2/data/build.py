@@ -388,6 +388,8 @@ def build_detection_train_loader(cfg, mapper=None):
         sampler = samplers.RepeatFactorTrainingSampler(
             dataset_dicts, cfg.DATALOADER.REPEAT_THRESHOLD
         )
+    elif sampler_name == "InferenceSampler":
+        sampler = samplers.InferenceSampler(len(dataset))
     else:
         raise ValueError("Unknown training sampler: {}".format(sampler_name))
     batch_sampler = build_batch_data_sampler(

@@ -221,29 +221,29 @@ def inference_and_visualize(detector, gambler, data_loader=None, mode="dataloade
 
                     y, loss_before_weighting, loss_gambler, weights = GANTrainer.sigmoid_gambler_loss(generated_output['pred_class_logits'], betting_map, gt_classes, normalize_w=global_cfg.MODEL.GAMBLER_HEAD.NORMALIZE)
                     vis = visualize_training(gt_classes, y, weights, input_images, storage)
-                    output(vis, os.path.join(global_cfg.OUTPUT_DIR, "images", str(idx) + ".jpg"))
+                    output(vis, os.path.join(global_cfg.OUTPUT_DIR, "images", inputs[0]["file_name"].rsplit('/', 1)[1]))
                     # for writer in periodic_writer._writers:
                     #     writer.write()
                     storage.step()
                     torch.cuda.synchronize()
                 # for writer in periodic_writer._writers:
                 #     writer.close()
-    else:
-        dicts = list(chain.from_iterable([DatasetCatalog.get(k) for k in global_cfg.DATASETS.TRAIN]))
-        for dic in tqdm.tqdm(dicts):
-            img = utils.read_image(dic["file_name"], "RGB")
-            input_images, generated_output, gt_classes, loss_dict = detector(img(2, 0, 1))
-            stride = 16
-            input_images = F.interpolate(input_images, scale_factor=1 / stride,
-                                         mode='bilinear')  # todo: stride depends on feature map layer
-            sigmoid_predictions = torch.sigmoid(generated_output['pred_class_logits'][0])
-            scaled_prob = (sigmoid_predictions - 0.5) * 256
-            gambler_input = torch.cat((input_images, scaled_prob), dim=1)
-            betting_map = gambler(gambler_input)
-
-            y, loss_before_weighting, loss_gambler, weights = GANTrainer.sigmoid_gambler_loss(generated_output['pred_class_logits'], betting_map, gt_classes, normalize_w=global_cfg.MODEL.GAMBLER_HEAD.NORMALIZE)
-            visualize_training(gt_classes, y, weights, input_images)
-            torch.cuda.synchronize()
+    # else:
+    #     dicts = list(chain.from_iterable([DatasetCatalog.get(k) for k in global_cfg.DATASETS.TRAIN]))
+    #     for dic in tqdm.tqdm(dicts):
+    #         img = utils.read_image(dic["file_name"], "RGB")
+    #         input_images, generated_output, gt_classes, loss_dict = detector(img(2, 0, 1))
+    #         stride = 16
+    #         input_images = F.interpolate(input_images, scale_factor=1 / stride,
+    #                                      mode='bilinear')  # todo: stride depends on feature map layer
+    #         sigmoid_predictions = torch.sigmoid(generated_output['pred_class_logits'][0])
+    #         scaled_prob = (sigmoid_predictions - 0.5) * 256
+    #         gambler_input = torch.cat((input_images, scaled_prob), dim=1)
+    #         betting_map = gambler(gambler_input)
+    #
+    #         y, loss_before_weighting, loss_gambler, weights = GANTrainer.sigmoid_gambler_loss(generated_output['pred_class_logits'], betting_map, gt_classes, normalize_w=global_cfg.MODEL.GAMBLER_HEAD.NORMALIZE)
+    #         visualize_training(gt_classes, y, weights, input_images)
+    #         torch.cuda.synchronize()
 
 
 @contextmanager

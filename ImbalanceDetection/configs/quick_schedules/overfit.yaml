@@ -8,7 +8,7 @@ MODEL:
   ANCHOR_GENERATOR:
     SIZES: !!python/object/apply:eval ["[[x, x * 2**(1.0/3), x * 2**(2.0/3)] for x in [64]]"]
   GAMBLER_HEAD:
-    NAME: "UnetLaurence"
+#    NAME: "UnetLaurence"
     GAMBLER_ITERATIONS: 100
     DETECTOR_ITERATIONS: 0
     GAMBLER_OUTPUT: "B1HW" #"B1HW"
@@ -18,7 +18,7 @@ MODEL:
     GAMBLER_LOSS_MODE: "focal"
     GAMBLER_OUT_CHANNELS: 1
     GAMBLER_IN_CHANNELS: 243 #3*80+3
-    BASE_LR: 0.01
+    BASE_LR: 0.001
     NORMALIZE: True
 #    LOAD_PRETRAINED_GAMBLER: True
 #    WEIGHTS: "./output/gambler/11scales_fix_detector_no_temperature_lambda27500/gambler_models/model_final.pth"
