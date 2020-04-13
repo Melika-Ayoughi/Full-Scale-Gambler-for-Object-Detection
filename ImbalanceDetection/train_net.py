@@ -40,7 +40,7 @@ from torchvision.utils import make_grid, save_image
 import matplotlib.pyplot as plt
 
 
-def permute_to_N_HWA_K(tensor, K):
+def N_AK_H_W_to_N_HWA_K(tensor, K):
     """
     Transpose/reshape a tensor from (N, (A x K), H, W) to (N, (HxWxA), K)
     """
@@ -52,14 +52,14 @@ def permute_to_N_HWA_K(tensor, K):
     return tensor
 
 
-def reverse_permute_to_N_HWA_K(tensor, N, H, W, K):
+def reverse_N_AK_H_W_to_N_HWA_K(tensor, N, H, W, K):
     tensor = tensor.reshape(N, H, W, -1, K)  # Size=(N,H,W,A,K)
     tensor = tensor.permute(0, 3, 4, 1, 2)
     tensor = tensor.view(N, -1, H, W)
     return tensor
 
 
-def permute_all_cls_to_N_HWA_K_and_concat(box_cls, num_classes=80):
+def permute_all_cls_to_NHWAxFPN_K_and_concat(box_cls, num_classes=80):
     """
     Rearrange the tensor layout from the network output, i.e.:
     list[Tensor]: #lvl tensors of shape (N, A x K, Hi, Wi)
@@ -70,7 +70,7 @@ def permute_all_cls_to_N_HWA_K_and_concat(box_cls, num_classes=80):
     # same format as the labels. Note that the labels are computed for
     # all feature levels concatenated, so we keep the same representation
     # for the objectness and the box_delta
-    box_cls_flattened = [permute_to_N_HWA_K(x, num_classes) for x in box_cls]
+    box_cls_flattened = [N_AK_H_W_to_N_HWA_K(x, num_classes) for x in box_cls]
     # box_delta_flattened = [permute_to_N_HWA_K(x, 4) for x in box_delta]
     # concatenate on the first dimension (representing the feature levels), to
     # take into account the way the labels were generated (with all feature maps
@@ -82,7 +82,7 @@ def permute_all_cls_to_N_HWA_K_and_concat(box_cls, num_classes=80):
 def reverse_permute_all_cls_to_N_HWA_K_and_concat(tensor, num_fpn_layers, N, H, W, num_classes=80):
     tensor = tensor.reshape(N, -1, num_classes) # (n,h*w*a,k)
     tensor = torch.chunk(tensor, num_fpn_layers, dim=1)  # todo not sure about this
-    tensor_prime = [reverse_permute_to_N_HWA_K(x, N, H, W, num_classes) for x in tensor]
+    tensor_prime = [reverse_N_AK_H_W_to_N_HWA_K(x, N, H, W, num_classes) for x in tensor]
     return tensor_prime
 
 
@@ -97,7 +97,7 @@ def permute_all_weights_to_N_HWA_K_and_concat(weights, num_classes=80, normalize
     # same format as the labels. Note that the labels are computed for
     # all feature levels concatenated, so we keep the same representation
     # for the objectness and the box_delta
-    weights_flattened = [permute_to_N_HWA_K(w, num_classes) for w in weights] # Size=(N,HWA,K)
+    weights_flattened = [N_AK_H_W_to_N_HWA_K(w, num_classes) for w in weights] # Size=(N,HWA,K)
     weights_flattened = [w + global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_TEMPERATURE for w in weights_flattened]
     if normalize_w is True:
         weights_flattened = [w / torch.sum(w, dim=[1,2], keepdim=True) for w in weights_flattened] #normalize by wxh only for now #todo experiment with normalizing across anchors -> distribute bets among scales maybe some are more important
@@ -133,12 +133,12 @@ def prepare_loss_grid(loss, num_scales):
     return loss_grid
 
 
-def prepare_gt_grid(gt_classes, batch, num_scales, W, H, device):
+def prepare_gt_grid(gt_classes, batch, num_scales, H, W, device):
     a = torch.ones(gt_classes.shape) * 0.5  # gray foreground by default
     a[gt_classes == -1] = 1  # white unmatched
     a[gt_classes == 80] = 0  # black background
     gt_classes = a.to(device)
-    gt = gt_classes.reshape(batch, W, H, -1, 1)  # (n, w, h, anchors, c)
+    gt = gt_classes.reshape(batch, H, W, -1, 1)  # (n, h, w, anchors, c)
     gt = torch.chunk(gt, num_scales, dim=3)  # todo hard coded scales #todo [0] is wrong /GAMBLER_OUT_CHANNELS is also wrong
     gt_list = []
     for _gt in gt:
@@ -160,10 +160,10 @@ def prepare_input_images(input_images, num_scales, device):
     return input_grid
 
 
-def prepare_betting_map(betting_map, batch, num_scales,  W, H, input_grid=None, heatmap_mode=True):
+def prepare_betting_map(betting_map, batch, num_scales, H, W, input_grid=None, heatmap_mode=True):
     # betting_map = normalize_to_01(betting_map)
     # betting_map = betting_map * 27500
-    betting_map = betting_map[:, 0].reshape(batch, W, H, -1,1)  # (n,w,h,a,c) #todo if weights are only per anchor and not per class
+    betting_map = betting_map[:, 0].reshape(batch, H, W, -1, 1)  # (n,w,h,a,c) #todo if weights are only per anchor and not per class
     bm = torch.chunk(betting_map, num_scales, dim=3) #todo hardcoded scales
     bm_list = []
     for scale, _bm in enumerate(bm):
@@ -197,21 +197,21 @@ def visualize_training(gt_classes, loss, betting_map, input_images, storage):
     device = torch.device(global_cfg.MODEL.DEVICE)
     anchor_scales = global_cfg.MODEL.ANCHOR_GENERATOR.SIZES
     if len(loss) > 1:
-        raise Exception("The code still does not supposrt the full FPN layers!")
+        raise Exception("The code still does not support the full FPN layers!")
     loss = loss[0] #todo: change for multiple fpn layers
-    [n, _, w, h] = loss.shape
+    [n, _, h, w] = loss.shape
 
     # Prepare loss *****************************************************************************************************
     loss_grid = prepare_loss_grid(loss, len(anchor_scales[0]))
 
     # Prepare ground truth *********************************************************************************************
-    gt_grid = prepare_gt_grid(gt_classes, n, len(anchor_scales[0]), w, h, device)
+    gt_grid = prepare_gt_grid(gt_classes, n, len(anchor_scales[0]), h, w, device)
 
     # Prepare input images *********************************************************************************************
     input_grid = prepare_input_images(input_images, 1, device)
 
     # Prepare betting map **********************************************************************************************
-    bets_and_input = prepare_betting_map(betting_map, n, len(anchor_scales[0]), w, h, input_grid=input_grid, heatmap_mode=False)
+    bets_and_input = prepare_betting_map(betting_map, n, len(anchor_scales[0]), h, w, input_grid=input_grid, heatmap_mode=False)
 
     vis = np.concatenate((bets_and_input, (normalize_to_01(loss_grid)).cpu().numpy(), input_grid.cpu().numpy()), axis=2) #todo: visualize gt as well
     storage.put_image("all", vis)
@@ -749,7 +749,6 @@ class GANTrainer(TrainerBase):
                 k: np.mean([x[k] for x in all_metrics_dict]) for k in all_metrics_dict[0].keys()
             }
             if "loss_gambler" in all_metrics_dict[0]:
-                # total_losses_reduced = metrics_dict["loss_box_reg"] + metrics_dict["loss_cls"] - self.gambler_outside_lambda * metrics_dict["loss_gambler"]
                 self.storage.put_scalar("loss_detector", metrics_dict["loss_detector"])
             else:
                 total_losses_reduced = sum(loss for loss in metrics_dict.values())
@@ -805,7 +804,7 @@ class GANTrainer(TrainerBase):
         return loss_gambler
 
     @staticmethod
-    def sigmoid_gambler_loss(pred_class_logits, weights, gt_classes, normalize_w=False, detach_pred=False):
+    def sigmoid_gambler_loss(pred_class_logits, weights, gt_classes, normalize_w=False, detach_pred=False, reduction="sum"):
         '''
 
         Args:
@@ -818,34 +817,13 @@ class GANTrainer(TrainerBase):
         Returns:
 
         '''
-        [n,ca,h,w] = pred_class_logits[0].shape
+        [N, AK, H, W] = pred_class_logits[0].shape
         if detach_pred is True:
             pred_class_logits = [p.detach() for p in pred_class_logits]
 
         num_classes = global_cfg.MODEL.RETINANET.NUM_CLASSES
-        # prepare weights
-        weights = permute_all_weights_to_N_HWA_K_and_concat([weights], 1, normalize_w) #todo hardcoded 3: scales
 
-        # # per location weights (neither per class nor per anchor)
-        # if global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_INPUT == "BCHW" and global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "B1HW":
-        #     [N, C] = weights.shape #C==1
-        #     # weights = weights.expand(N, num_classes)
-        #     weights = weights.repeat(1, num_classes)
-        # # aggregated anchor weights
-        # elif global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_INPUT == "BCAHW" and global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "B1HW":
-        #     anchor_scales = global_cfg.MODEL.ANCHOR_GENERATOR.SIZES
-        #     weights = weights.repeat_interleave(len(anchor_scales[0]), dim=0)  # todo hardcoded 3: scales [0] is wrong
-        #     [N, C] = weights.shape #C==1
-        #     # weights = weights.expand(N, num_classes)
-        #     weights = weights.repeat(1, num_classes)
-        # # per anchor weights, aggregated class weights
-        # elif global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_INPUT == "BCAHW" and global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "BAHW":
-        #     [N, C] = weights.shape  # C==1
-        #     # weights = weights.expand(N, num_classes)
-        #     weights = weights.repeat(1, num_classes)
-
-
-        pred_class_logits = permute_all_cls_to_N_HWA_K_and_concat(
+        pred_class_logits = permute_all_cls_to_NHWAxFPN_K_and_concat(
             pred_class_logits, num_classes
         )  # Shapes: (N x R, K) and (N x R, 4), respectively.
         gt_classes = gt_classes.flatten() #todo next: change the shape of gt to the proper shape
@@ -856,118 +834,199 @@ class GANTrainer(TrainerBase):
         gt_classes_target = torch.zeros_like(pred_class_logits)
         gt_classes_target[foreground_idxs, gt_classes[foreground_idxs]] = 1
 
-        # logits loss
-        NAKHW_loss, gambler_loss = GANTrainer.sigmoid_loss(
-            pred_class_logits,
-            gt_classes_target,
-            weights,
-            valid_idxs, # -1 labels are ignored for calculating the loss
-            n,
-            h,
-            w,
-            mode=global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_LOSS_MODE,
-            alpha=global_cfg.MODEL.RETINANET.FOCAL_LOSS_ALPHA,
-            gamma=global_cfg.MODEL.RETINANET.FOCAL_LOSS_GAMMA,
-            reduction="sum")
-        # gambler_loss = gambler_loss / max(1, num_foreground)
+        p = torch.sigmoid(pred_class_logits)
+        ce_loss = F.binary_cross_entropy_with_logits(pred_class_logits, gt_classes_target, reduction="none") # (N x R, K)
+        p_t = p * gt_classes_target + (1 - p) * (1 - gt_classes_target)
 
-        # y = torch.zeros((list(valid_idxs.shape)[0], 80)).to(global_cfg.MODEL.DEVICE)
-        # y[valid_idxs, :] = loss_before_weighting.clone().detach()
-        # y = y.reshape(n, h, w, num_classes, -1) #(n,w,h,c,a) #todo: wrong -1, num_classes
-        # y = y.permute(0, 3, 4, 1, 2)
-        # y = y.sum(dim=[1], keepdim=False) # aggregate the loss over classes but not anchor scales
-        # loss_before_weighting = loss_before_weighting.sum()
-        # loss_before_weighting = loss_before_weighting / max(1, num_foreground)
-        loss_before_weighting = [loss.sum() for loss in NAKHW_loss]
-        return NAKHW_loss, sum(loss_before_weighting) / max(1, num_foreground), gambler_loss, weights.data
-
-    @staticmethod
-    def sigmoid_loss(inputs, targets, weights, valid_idxs, N, H, W, mode: str = "sigmoid", alpha: float = -1, gamma: float = 2, reduction: str = "none"):
-        """
-        Weighted sigmoid loss that could be like focal loss
-        Args:
-            inputs: A float tensor of arbitrary shape.
-                    The predictions for each example.
-            targets: A float tensor with the same shape as inputs. Stores the binary
-                     classification label for each element in inputs
-                    (0 for the negative class and 1 for the positive class).
-            weights: A float tensor, shape is dependent on config (N, 1, Hi, Wi) or (N, C, Hi, Wi)
-            valid_idxs: valid ids should be the same shape as the loss
-            mode: (optional) A string that specifies the mode of this loss
-                    'none': weighted bce loss
-                    'focal': weighted focal loss
-            alpha: (optional) Weighting factor in range (0,1) to balance
-                    positive vs negative examples. Default = -1 (no weighting).
-            gamma: Exponent of the modulating factor (1 - p_t) to
-                   balance easy vs hard examples.
-            reduction: 'none' | 'mean' | 'sum'
-                     'none': No reduction will be applied to the output.
-                     'mean': The output will be averaged.
-                     'sum': The output will be summed.
-        Returns:
-            Loss tensor with the reduction option applied.
-        """
-        p = torch.sigmoid(inputs)
-        ce_loss = F.binary_cross_entropy_with_logits( #(N x R, K)
-            inputs, targets, reduction="none"
-        )
-        p_t = p * targets + (1 - p) * (1 - targets)
+        mode = global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_LOSS_MODE
+        alpha = global_cfg.MODEL.RETINANET.FOCAL_LOSS_ALPHA
+        gamma = global_cfg.MODEL.RETINANET.FOCAL_LOSS_GAMMA
 
         if mode == "focal":
-            loss = ce_loss * ((1 - p_t) ** gamma)
+            gambler_loss = ce_loss * ((1 - p_t) ** gamma)
             if alpha >= 0:
-                alpha_t = alpha * targets + (1 - alpha) * (1 - targets)
-                loss = alpha_t * loss
+                alpha_t = alpha * gt_classes_target + (1 - alpha) * (1 - gt_classes_target)
+                gambler_loss = alpha_t * gambler_loss
         elif mode == "sigmoid":
-            loss = ce_loss
+            gambler_loss = ce_loss
         else:
             logging.error("No mode it selected for the retinanet loss!!")
-            loss = None
-        # ignore the invalid ids in loss
-        valid_loss = torch.zeros_like(loss) #todo: backprop
-        valid_loss[valid_idxs, :] = loss[valid_idxs, :]
+            gambler_loss = None
 
-        loss = reverse_permute_all_cls_to_N_HWA_K_and_concat(valid_loss, 1, N, H, W, global_cfg.MODEL.RETINANET.NUM_CLASSES) #N,AK,H,W_loss
+        # ignore the invalid ids in loss
+        valid_loss = torch.zeros_like(gambler_loss)  # todo: backprop
+        valid_loss[valid_idxs, :] = gambler_loss[valid_idxs, :]
+
+        gambler_loss = reverse_permute_all_cls_to_N_HWA_K_and_concat(valid_loss, 1, N, H, W, num_classes)  # N,AK,H,W_loss #todo num fpn layers
 
         if global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "B1HW":
-            loss = [torch.sum(l, dim=[1], keepdim=True) for l in loss]  # aggregate over classes and anchors
-            NAKHW_loss = [l.clone().detach() for l in loss]
-            loss = permute_all_cls_to_N_HWA_K_and_concat(loss, num_classes=1)
+            gambler_loss = [torch.sum(l, dim=[1], keepdim=True) for l in gambler_loss]  # aggregate over classes and anchors
+            NAKHW_loss = [l.clone().detach() for l in gambler_loss]
+            gambler_loss = permute_all_cls_to_NHWAxFPN_K_and_concat(gambler_loss, num_classes=1)
             # loss = [torch.sum(l, dim=[1,2], keepdim=True) for l in loss] # aggregate over classes and anchors #todo seperate classes and anchors
         elif global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "BCHW":
-            loss = [torch.sum(l, dim=[1], keepdim=True) for l in loss] # aggregate over anchors
+            gambler_loss = [torch.sum(l, dim=[1], keepdim=True) for l in gambler_loss]  # aggregate over anchors
         elif global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "BAHW":
-            loss = [torch.sum(l, dim=[2], keepdim=True) for l in loss] # aggregate over classes
+            gambler_loss = [torch.sum(l, dim=[2], keepdim=True) for l in gambler_loss]  # aggregate over classes
         elif global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "BCAHW":
-            loss = loss # do nothing
+            gambler_loss = gambler_loss  # do nothing
 
-
-        print("______________________________________________________________________________________________________")
-        print("loss shape: ‌", loss.shape, "weight shape: ", weights.shape)
-        s = get_event_storage()
+        storage = get_event_storage()
         with open(os.path.join(global_cfg.OUTPUT_DIR, "weights‌.csv"), "a") as my_csv:
-            my_csv.write(f"iteration: {str(s.iter)}, max weight: {weights.max()},‌ max loss: {loss.max()}, "
-                         f"loss where weight is max: {loss[weights.argmax()].item()}, weight where loss is max: {weights[loss.argmax()].item()},"
-                         f"weight argmax: {weights.argmax()}, loss argmax: {loss.argmax()},")
-        # import csv
-        # csvWriter = csv.writer(my_csv, delimiter=',')
-        # csvWriter.writerows(weights.cpu().numpy())
+            max_loss = []
+            max_weights = []
+            for i in range(N):
+                assert len(NAKHW_loss) == 1, "csv write does not work for full fpn layer!"
+                max_loss.append(NAKHW_loss[0][i, :, :, :].max().cpu().numpy())
+                max_weights.append(weights[i, :, :, :].max().cpu().numpy())
+                my_csv.write(
+                    f"iteration: {str(storage.iter)}, image: {str(i)}, max weight: {max_weights[-1]},‌ max loss: {max_loss[-1]}, "
+                    f"loss where weight is max: {NAKHW_loss[0][i, :, :, :].flatten()[weights[i, :, :, :].argmax()].item()}, weight where loss is max: {weights[i, :, :, :].flatten()[NAKHW_loss[0][i, :, :, :].argmax()].item()},"
+                    f"weight argmax: {weights[i, :, :, :].argmax()}, loss argmax: {NAKHW_loss[0][i, :, :, :].argmax()}\n")
 
-        # with open(os.path.join(global_cfg.OUTPUT_DIR, "losses.csv"), "w") as my_csv:
-        #     csvWriter = csv.writer(my_csv, delimiter=',')
-        #     csvWriter.writerows(loss.sum(dim=1, keepdim=True).cpu().numpy())
+        storage.put_scalar("max/loss", np.mean(np.array(max_loss)))  # mean over the batch
+        storage.put_scalar("max/weight", np.mean(np.array(max_weights)))  # mean over the batch
 
-        loss = -weights * loss
+        weights = permute_all_weights_to_N_HWA_K_and_concat([weights], 1, normalize_w)  # todo hardcoded 3: scales
+        gambler_loss = -weights * gambler_loss
 
         if reduction == "mean":
-            loss = loss.mean()
+            gambler_loss = gambler_loss.mean()
         elif reduction == "sum":
-            loss = loss.sum()
+            gambler_loss = gambler_loss.sum()
 
         with open(os.path.join(global_cfg.OUTPUT_DIR, "weights‌.csv"), "a") as my_csv:
-            my_csv.write(f"sum loss after weighting: {loss}\n")
+            my_csv.write(f"sum loss after weighting: {gambler_loss}\n")
 
-        return NAKHW_loss, loss
+        loss_before_weighting = [loss.sum() for loss in NAKHW_loss]
+
+        return NAKHW_loss, sum(loss_before_weighting)/max(1, num_foreground), gambler_loss, weights.data
+
+    # @staticmethod
+    # def sigmoid_loss(inputs, targets, weights, valid_idxs, N, H, W, mode: str = "sigmoid", alpha: float = -1, gamma: float = 2, reduction: str = "none", normalize_w=False):
+    #     """
+    #     Weighted sigmoid loss that could be like focal loss
+    #     Args:
+    #         inputs: A float tensor of arbitrary shape.
+    #                 The predictions for each example.
+    #         targets: A float tensor with the same shape as inputs. Stores the binary
+    #                  classification label for each element in inputs
+    #                 (0 for the negative class and 1 for the positive class).
+    #         weights: A float tensor, shape is dependent on config (N, 1, Hi, Wi) or (N, C, Hi, Wi)
+    #         valid_idxs: valid ids should be the same shape as the loss
+    #         mode: (optional) A string that specifies the mode of this loss
+    #                 'none': weighted bce loss
+    #                 'focal': weighted focal loss
+    #         alpha: (optional) Weighting factor in range (0,1) to balance
+    #                 positive vs negative examples. Default = -1 (no weighting).
+    #         gamma: Exponent of the modulating factor (1 - p_t) to
+    #                balance easy vs hard examples.
+    #         reduction: 'none' | 'mean' | 'sum'
+    #                  'none': No reduction will be applied to the output.
+    #                  'mean': The output will be averaged.
+    #                  'sum': The output will be summed.
+    #     Returns:
+    #         Loss tensor with the reduction option applied.
+    #     """
+    #     p = torch.sigmoid(inputs)
+    #     ce_loss = F.binary_cross_entropy_with_logits( #(N x R, K)
+    #         inputs, targets, reduction="none"
+    #     )
+    #     p_t = p * targets + (1 - p) * (1 - targets)
+    #
+    #     if mode == "focal":
+    #         loss = ce_loss * ((1 - p_t) ** gamma)
+    #         if alpha >= 0:
+    #             alpha_t = alpha * targets + (1 - alpha) * (1 - targets)
+    #             loss = alpha_t * loss
+    #     elif mode == "sigmoid":
+    #         loss = ce_loss
+    #     else:
+    #         logging.error("No mode it selected for the retinanet loss!!")
+    #         loss = None
+    #     # ignore the invalid ids in loss
+    #     valid_loss = torch.zeros_like(loss) #todo: backprop
+    #     valid_loss[valid_idxs, :] = loss[valid_idxs, :]
+    #
+    #     loss = reverse_permute_all_cls_to_N_HWA_K_and_concat(valid_loss, 1, N, H, W, global_cfg.MODEL.RETINANET.NUM_CLASSES) #N,AK,H,W_loss
+    #
+    #     if global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "B1HW":
+    #         loss = [torch.sum(l, dim=[1], keepdim=True) for l in loss]  # aggregate over classes and anchors
+    #         NAKHW_loss = [l.clone().detach() for l in loss]
+    #         loss = permute_all_cls_to_NHWAxFPN_K_and_concat(loss, num_classes=1)
+    #         # loss = [torch.sum(l, dim=[1,2], keepdim=True) for l in loss] # aggregate over classes and anchors #todo seperate classes and anchors
+    #     elif global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "BCHW":
+    #         loss = [torch.sum(l, dim=[1], keepdim=True) for l in loss] # aggregate over anchors
+    #     elif global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "BAHW":
+    #         loss = [torch.sum(l, dim=[2], keepdim=True) for l in loss] # aggregate over classes
+    #     elif global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "BCAHW":
+    #         loss = loss # do nothing
+    #
+    #
+    #     # print("______________________________________________________________________________________________________")
+    #     # print("loss shape: ‌", loss.shape, "weight shape: ", weights.shape)
+    #     s = get_event_storage()
+    #     # print(weights.shape, NAKHW_loss[0].shape, loss.shape)
+    #     [n, _, _, _] = NAKHW_loss[0].shape  # n x ak x h x w
+    #     with open(os.path.join(global_cfg.OUTPUT_DIR, "weights‌.csv"), "a") as my_csv:
+    #         for i in range(n):
+    #             assert len(NAKHW_loss) == 1, "csv write does not work for full fpn layer!"
+    #             my_csv.write(
+    #                 f"iteration: {str(s.iter)}, image: {str(i)}, max weight: {weights[i, :, :, :].max()},‌ max loss: {NAKHW_loss[0][i, :, :, :].max()}, "
+    #                 f"loss where weight is max: {NAKHW_loss[0][i, :, :, :].flatten()[weights[i, :, :, :].argmax()].item()}, weight where loss is max: {weights[i, :, :, :].flatten()[NAKHW_loss[0][i, :, :, :].argmax()].item()},"
+    #                 f"weight argmax: {weights[i, :, :, :].argmax()}, loss argmax: {NAKHW_loss[0][i, :, :, :].argmax()}\n")
+    #
+    #     weights = permute_all_weights_to_N_HWA_K_and_concat([weights], 1, normalize_w)  # todo hardcoded 3: scales
+    #     loss = -weights * loss
+    #
+    #     if reduction == "mean":
+    #         loss = loss.mean()
+    #     elif reduction == "sum":
+    #         loss = loss.sum()
+    #
+    #     with open(os.path.join(global_cfg.OUTPUT_DIR, "weights‌.csv"), "a") as my_csv:
+    #         my_csv.write(f"sum loss after weighting: {loss}\n")
+    #
+    #     return NAKHW_loss, loss, weights
+
+    def calc_log_metrics(self, betting_map, weights, loss_dict, loss_gambler, loss_before_weighting, data_time):
+
+        loss_dict.update({"loss_box_reg": loss_dict["loss_box_reg"] * self.regression_loss_lambda})
+        loss_gambler = loss_gambler * self.gambler_loss_lambda
+        loss_dict.update({"loss_gambler": loss_gambler})
+        loss_dict.update({"loss_before_weighting": loss_before_weighting})
+        loss_detector = loss_dict["loss_box_reg"] + loss_dict["loss_cls"] - self.gambler_outside_lambda * loss_dict["loss_gambler"]
+        loss_dict.update({"loss_detector": loss_detector})
+
+        self._detect_anomaly(loss_detector, loss_dict)
+        self._detect_anomaly(loss_gambler, loss_dict)
+
+        loss_dict["gambler_bets/sum"] = torch.sum(betting_map)
+        loss_dict["gambler_bets/max"] = torch.max(betting_map)
+        loss_dict["gambler_bets/mean"] = torch.mean(betting_map)
+        loss_dict["gambler_bets/median"] = torch.median(betting_map)
+        loss_dict["visualized weights/sum"] = torch.sum(weights)
+        loss_dict["visualized weights/max"] = torch.max(weights)
+        loss_dict["visualized weights/mean"] = torch.mean(weights)
+        loss_dict["visualized weights/median"] = torch.median(weights)
+        loss_dict["data_time/gambler_iter"] = data_time
+
+        return loss_dict
+
+    def prepare_input_gambler(self, input_images, generated_output):
+        stride = 16  # todo: stride depends on feature map layer
+        input_images = F.interpolate(input_images, scale_factor=1 / stride, mode='bilinear')
+        sigmoid_predictions = torch.sigmoid(generated_output['pred_class_logits'][0])
+
+        if self.cfg.MODEL.GAMBLER_HEAD.DATA_RANGE == [-0.5, 0.5]:
+            scaled_prob = (sigmoid_predictions - 0.5)
+            input_images = (input_images / 256.0)
+        elif self.cfg.MODEL.GAMBLER_HEAD.DATA_RANGE == [-128, 128]:
+            scaled_prob = (sigmoid_predictions - 0.5) * 256
+
+        # concatenate along the channel
+        gambler_input = torch.cat((input_images, scaled_prob), dim=1)  # (N,3+AK,H,W)
+        return gambler_input, input_images
 
     def run_step(self):
         """
@@ -984,102 +1043,49 @@ class GANTrainer(TrainerBase):
 
         input_images, generated_output, gt_classes, loss_dict = self.detection_model(data)
 
-        stride = 16 # todo: stride depends on feature map layer
-        input_images = F.interpolate(input_images, scale_factor=1 / stride, mode='bilinear')
-
-        # concatenate along the channel
-        sigmoid_predictions = torch.sigmoid(generated_output['pred_class_logits'][0])
-        scaled_prob = (sigmoid_predictions - 0.5) * 256
-        gambler_input = torch.cat((input_images, scaled_prob), dim=1)
+        gambler_input, input_images = self.prepare_input_gambler(input_images, generated_output)
 
         if self.iter_G < self.max_iter_gambler:
-            # self.detection_model.eval()
-            # self.gambler_model.train()
-
             logger.info(f"Iteration {self.iter} in Gambler")
-            betting_map = self.gambler_model(gambler_input)
-            y, loss_before_weighting, loss_gambler, weights = self.sigmoid_gambler_loss(generated_output['pred_class_logits'], betting_map, gt_classes, normalize_w=self.cfg.MODEL.GAMBLER_HEAD.NORMALIZE, detach_pred=True)  #todo not detaching
+            betting_map = self.gambler_model(gambler_input)  # (N,AK,H,W)
+            y, loss_before_weighting, loss_gambler, weights = self.sigmoid_gambler_loss(generated_output['pred_class_logits'], betting_map, gt_classes, normalize_w=self.cfg.MODEL.GAMBLER_HEAD.NORMALIZE, detach_pred=True)
 
-            if self.vis_period > 0: #todo hooks
-                storage = get_event_storage()
-                storage.put_scalar("gambler_bets/sum", torch.sum(betting_map))
-                storage.put_scalar("gambler_bets/max", torch.max(betting_map))
-                storage.put_scalar("gambler_bets/mean", torch.mean(betting_map))
-                storage.put_scalar("gambler_bets/median", torch.median(betting_map))
-                storage.put_scalar("visualized weights/sum", torch.sum(weights))
-                storage.put_scalar("visualized weights/max", torch.max(weights))
-                storage.put_scalar("visualized weights/mean", torch.mean(weights))
-                storage.put_scalar("visualized weights/median", torch.median(weights))
-                if storage.iter % self.vis_period == 0:
-                    visualize_training(gt_classes, y, weights, input_images, storage)
+            # if self.vis_period > 0: #todo hooks
+                # storage = get_event_storage()
+            if self.vis_period > 0 and self.storage.iter % self.vis_period == 0:
+                visualize_training(gt_classes, y, weights, input_images, self.storage)
 
-            loss_dict.update({"loss_box_reg": loss_dict["loss_box_reg"] * self.regression_loss_lambda})
-            loss_gambler = loss_gambler * self.gambler_loss_lambda
-            loss_dict.update({"loss_gambler": loss_gambler})
-            loss_dict.update({"loss_before_weighting": loss_before_weighting})
-            loss_detector = loss_dict["loss_box_reg"] + loss_dict["loss_cls"] - self.gambler_outside_lambda * loss_dict["loss_gambler"]
-            loss_dict.update({"loss_detector": loss_detector})
-            self._detect_anomaly(loss_detector, loss_dict)
-            self._detect_anomaly(loss_gambler, loss_dict)
-            metrics_dict = loss_dict
-            metrics_dict["data_time/gambler_iter"] = data_time
+            metrics_dict = self.calc_log_metrics(betting_map, weights, loss_dict, loss_gambler, loss_before_weighting, data_time)
 
             self.gambler_optimizer.zero_grad()
-            loss_gambler.backward()
-            # for name, param in self.gambler_model.named_parameters():
-            #     print(param.requires_grad)
-            # print(self.gambler_model.module.outc.conv.weight.grad)
+            metrics_dict["loss_gambler"].backward()
             self.gambler_optimizer.step()
-            # self.detection_model.train()
-            # self.gambler_model.train()
-
             self.iter_G += 1
             if self.iter_G == self.max_iter_gambler:
                 logger.info("Finished training Gambler")
 
         elif self.iter_D < self.max_iter_detector:
-            # self.detection_model.train()
-            # self.gambler_model.eval()
-
             logger.info(f"Iteration {self.iter} in Detector")
+            betting_map = self.gambler_model(gambler_input)  # (N,AK,H,W)
+            y, loss_before_weighting, loss_gambler, weights = self.sigmoid_gambler_loss(generated_output['pred_class_logits'], betting_map, gt_classes, normalize_w=self.cfg.MODEL.GAMBLER_HEAD.NORMALIZE, detach_pred=False)
 
-            betting_map = self.gambler_model(gambler_input)
-            # logger.debug(f"Gambler bets: {betting_map}")
-            logger.debug(f"Gambler bets: max:{torch.max(betting_map)} min:{torch.min(betting_map)} mean:{torch.mean(betting_map)} median: {torch.median(betting_map)}")
+            # if self.vis_period > 0:
+                # storage = get_event_storage()
+            if self.vis_period > 0 and self.storage.iter % self.vis_period == 0:
+                visualize_training(gt_classes, y, weights, input_images, self.storage)
 
-            # weighting the loss with the output of the gambler
-            y, loss_before_weighting, loss_gambler, weight = self.sigmoid_gambler_loss(generated_output['pred_class_logits'], betting_map, gt_classes, detach_pred=False) # todo not detaching
-            # loss_gambler = self.softmax_ce_gambler_loss(generated_output['pred_class_logits'][0].detach(), betting_map, gt_classes)
-
-            if self.vis_period > 0:
-                storage = get_event_storage()
-                if storage.iter % self.vis_period == 0:
-                    visualize_training(gt_classes, y, weight, input_images, storage)
-
-            loss_dict.update({"loss_box_reg": loss_dict["loss_box_reg"] * self.regression_loss_lambda})
-            loss_gambler = loss_gambler * self.gambler_loss_lambda
-            loss_dict.update({"loss_gambler": loss_gambler})
-            loss_dict.update({"loss_before_weighting": loss_before_weighting})
-            loss_detector = loss_dict["loss_box_reg"] + loss_dict["loss_cls"] - self.gambler_outside_lambda * loss_dict["loss_gambler"]
-            loss_dict.update({"loss_detector": loss_detector})
-            self._detect_anomaly(loss_detector, loss_dict)
-            self._detect_anomaly(loss_gambler, loss_dict)
-            metrics_dict = loss_dict
-            metrics_dict["data_time/detector_iter"] = data_time
+            metrics_dict = self.calc_log_metrics(betting_map, weights, loss_dict, loss_gambler, loss_before_weighting, data_time)
 
             self.detection_optimizer.zero_grad()
-            loss_detector.backward()
+            metrics_dict["loss_detector"].backward()
             torch.nn.utils.clip_grad_norm_(self.detection_model.parameters(), 10)
             self.detection_optimizer.step()
-
-            # self.detection_model.train()
-            # self.gambler_model.train()
-
             self.iter_D += 1
             if self.iter_D == self.max_iter_detector:
                 logger.info("Finished training Detector")
                 self.iter_G = 0
                 self.iter_D = 0
+
         else:
             metrics_dict = {}
             logger.debug("Neither D_iter nor G_iter! Debugging with fixed detector!")

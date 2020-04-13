@@ -14,26 +14,24 @@ MODEL:
     GAMBLER_OUTPUT: "B1HW" #"B1HW"
     GAMBLER_LAMBDA: 1 # GAMBLER_OUT_CHANNELS*w=28*h=40 #todo: need to change to actual h and w times scales
     GAMBLER_OUTSIDE_LAMBDA: 1
-    GAMBLER_TEMPERATURE: 0.0
+    GAMBLER_TEMPERATURE: 1e-20 #epsilon is needed for divide by 0
     GAMBLER_LOSS_MODE: "focal"
     GAMBLER_OUT_CHANNELS: 1
     GAMBLER_IN_CHANNELS: 243 #3*80+3
     BASE_LR: 0.001
     NORMALIZE: True
+#    DATA_RANGE: [-0.5, 0.5]
 #    LOAD_PRETRAINED_GAMBLER: True
 #    WEIGHTS: "./output/gambler/11scales_fix_detector_no_temperature_lambda27500/gambler_models/model_final.pth"
 DATASETS:
 #  TRAIN: ("coco_2017_train_8samples",)
 #  TEST: ("coco_2017_train_8samples",)
+#  TRAIN: ("coco_2017_train_8_difficult_samples",)
+#  TEST: ("coco_2017_train_8_difficult_samples",)
   TRAIN: ("coco_2017_train_100samples",)
   TEST: ("coco_2017_train_100samples",)
 TEST:
   EVAL_PERIOD: 1000 #500
-#  AUG:
-#    ENABLED: false
-#    FLIP: false
-#    MAX_SIZE: 4000
-#    MIN_SIZES:(600, )
 SOLVER:
   STEPS: (8000,8500)
   MAX_ITER: 9000
@@ -47,4 +45,4 @@ INPUT:
   RESIZING: False
 DATALOADER:
     ASPECT_RATIO_GROUPING: False
-OUTPUT_DIR: "./output/gambler/debug"
+OUTPUT_DIR: "./output/gambler/compare_to_overfit_without_aspectratio_resizing"

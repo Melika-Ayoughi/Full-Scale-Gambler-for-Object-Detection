@@ -38,6 +38,8 @@ def add_gambler_config(cfg):
     _C.MODEL.GAMBLER_HEAD.GAMBLER_LOSS_MODE = "focal"
     # normalizing the weights of the gambler, turned off for sanity check that gambler is learning
     _C.MODEL.GAMBLER_HEAD.NORMALIZE = True
+    # adjusting the range of the data given to the gambler
+    _C.MODEL.GAMBLER_HEAD.DATA_RANGE = [-128, 128]
     # The period (in terms of steps) for minibatch visualization at train time.
     # Set to 0 to disable.
     _C.MODEL.GAMBLER_HEAD.VIS_PERIOD = 300
