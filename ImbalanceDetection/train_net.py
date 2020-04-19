@@ -575,7 +575,7 @@ class GANTrainer(TrainerBase):
 
         ret = [
             hooks.IterationTimer(),
-            hooks.LRScheduler(optimizer, scheduler),
+            hooks.DetectorLRScheduler(optimizer, scheduler),
             hooks.PreciseBN(
                 # Run at the same freq as (but before) evaluation.
                 cfg.TEST.EVAL_PERIOD,
@@ -633,7 +633,7 @@ class GANTrainer(TrainerBase):
 
         ret = [
             # hooks.IterationTimer(),
-            hooks.LRScheduler(optimizer, scheduler),
+            hooks.GamblerLRScheduler(optimizer, scheduler),
             hooks.PreciseBN(
                 # Run at the same freq as (but before) evaluation.
                 cfg.TEST.EVAL_PERIOD,
@@ -877,15 +877,15 @@ class GANTrainer(TrainerBase):
             max_weights = []
             for i in range(N):
                 assert len(NAKHW_loss) == 1, "csv write does not work for full fpn layer!"
-                max_loss.append(NAKHW_loss[0][i, :, :, :].max().cpu().numpy())
-                max_weights.append(weights[i, :, :, :].max().cpu().numpy())
+                max_loss.append(NAKHW_loss[0][i, :, :, :].max().detach().cpu().numpy())
+                max_weights.append(weights[i, :, :, :].max().detach().cpu().numpy())
                 my_csv.write(
                     f"iteration: {str(storage.iter)}, image: {str(i)}, max weight: {max_weights[-1]},‌ max loss: {max_loss[-1]}, "
                     f"loss where weight is max: {NAKHW_loss[0][i, :, :, :].flatten()[weights[i, :, :, :].argmax()].item()}, weight where loss is max: {weights[i, :, :, :].flatten()[NAKHW_loss[0][i, :, :, :].argmax()].item()},"
                     f"weight argmax: {weights[i, :, :, :].argmax()}, loss argmax: {NAKHW_loss[0][i, :, :, :].argmax()}\n")
 
-        storage.put_scalar("max/loss", np.mean(np.array(max_loss)))  # mean over the batch
-        storage.put_scalar("max/weight", np.mean(np.array(max_weights)))  # mean over the batch
+        storage.put_scalar("sum/max_loss", np.sum(np.array(max_loss)))  # sum over the batch
+        storage.put_scalar("sum/max_weight", np.sum(np.array(max_weights)))  # sum over the batch
 
         weights = permute_all_weights_to_N_HWA_K_and_concat([weights], 1, normalize_w)  # todo hardcoded 3: scales
         gambler_loss = -weights * gambler_loss
@@ -901,93 +901,6 @@ class GANTrainer(TrainerBase):
         loss_before_weighting = [loss.sum() for loss in NAKHW_loss]
 
         return NAKHW_loss, sum(loss_before_weighting)/max(1, num_foreground), gambler_loss, weights.data
-
-    # @staticmethod
-    # def sigmoid_loss(inputs, targets, weights, valid_idxs, N, H, W, mode: str = "sigmoid", alpha: float = -1, gamma: float = 2, reduction: str = "none", normalize_w=False):
-    #     """
-    #     Weighted sigmoid loss that could be like focal loss
-    #     Args:
-    #         inputs: A float tensor of arbitrary shape.
-    #                 The predictions for each example.
-    #         targets: A float tensor with the same shape as inputs. Stores the binary
-    #                  classification label for each element in inputs
-    #                 (0 for the negative class and 1 for the positive class).
-    #         weights: A float tensor, shape is dependent on config (N, 1, Hi, Wi) or (N, C, Hi, Wi)
-    #         valid_idxs: valid ids should be the same shape as the loss
-    #         mode: (optional) A string that specifies the mode of this loss
-    #                 'none': weighted bce loss
-    #                 'focal': weighted focal loss
-    #         alpha: (optional) Weighting factor in range (0,1) to balance
-    #                 positive vs negative examples. Default = -1 (no weighting).
-    #         gamma: Exponent of the modulating factor (1 - p_t) to
-    #                balance easy vs hard examples.
-    #         reduction: 'none' | 'mean' | 'sum'
-    #                  'none': No reduction will be applied to the output.
-    #                  'mean': The output will be averaged.
-    #                  'sum': The output will be summed.
-    #     Returns:
-    #         Loss tensor with the reduction option applied.
-    #     """
-    #     p = torch.sigmoid(inputs)
-    #     ce_loss = F.binary_cross_entropy_with_logits( #(N x R, K)
-    #         inputs, targets, reduction="none"
-    #     )
-    #     p_t = p * targets + (1 - p) * (1 - targets)
-    #
-    #     if mode == "focal":
-    #         loss = ce_loss * ((1 - p_t) ** gamma)
-    #         if alpha >= 0:
-    #             alpha_t = alpha * targets + (1 - alpha) * (1 - targets)
-    #             loss = alpha_t * loss
-    #     elif mode == "sigmoid":
-    #         loss = ce_loss
-    #     else:
-    #         logging.error("No mode it selected for the retinanet loss!!")
-    #         loss = None
-    #     # ignore the invalid ids in loss
-    #     valid_loss = torch.zeros_like(loss) #todo: backprop
-    #     valid_loss[valid_idxs, :] = loss[valid_idxs, :]
-    #
-    #     loss = reverse_permute_all_cls_to_N_HWA_K_and_concat(valid_loss, 1, N, H, W, global_cfg.MODEL.RETINANET.NUM_CLASSES) #N,AK,H,W_loss
-    #
-    #     if global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "B1HW":
-    #         loss = [torch.sum(l, dim=[1], keepdim=True) for l in loss]  # aggregate over classes and anchors
-    #         NAKHW_loss = [l.clone().detach() for l in loss]
-    #         loss = permute_all_cls_to_NHWAxFPN_K_and_concat(loss, num_classes=1)
-    #         # loss = [torch.sum(l, dim=[1,2], keepdim=True) for l in loss] # aggregate over classes and anchors #todo seperate classes and anchors
-    #     elif global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "BCHW":
-    #         loss = [torch.sum(l, dim=[1], keepdim=True) for l in loss] # aggregate over anchors
-    #     elif global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "BAHW":
-    #         loss = [torch.sum(l, dim=[2], keepdim=True) for l in loss] # aggregate over classes
-    #     elif global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "BCAHW":
-    #         loss = loss # do nothing
-    #
-    #
-    #     # print("______________________________________________________________________________________________________")
-    #     # print("loss shape: ‌", loss.shape, "weight shape: ", weights.shape)
-    #     s = get_event_storage()
-    #     # print(weights.shape, NAKHW_loss[0].shape, loss.shape)
-    #     [n, _, _, _] = NAKHW_loss[0].shape  # n x ak x h x w
-    #     with open(os.path.join(global_cfg.OUTPUT_DIR, "weights‌.csv"), "a") as my_csv:
-    #         for i in range(n):
-    #             assert len(NAKHW_loss) == 1, "csv write does not work for full fpn layer!"
-    #             my_csv.write(
-    #                 f"iteration: {str(s.iter)}, image: {str(i)}, max weight: {weights[i, :, :, :].max()},‌ max loss: {NAKHW_loss[0][i, :, :, :].max()}, "
-    #                 f"loss where weight is max: {NAKHW_loss[0][i, :, :, :].flatten()[weights[i, :, :, :].argmax()].item()}, weight where loss is max: {weights[i, :, :, :].flatten()[NAKHW_loss[0][i, :, :, :].argmax()].item()},"
-    #                 f"weight argmax: {weights[i, :, :, :].argmax()}, loss argmax: {NAKHW_loss[0][i, :, :, :].argmax()}\n")
-    #
-    #     weights = permute_all_weights_to_N_HWA_K_and_concat([weights], 1, normalize_w)  # todo hardcoded 3: scales
-    #     loss = -weights * loss
-    #
-    #     if reduction == "mean":
-    #         loss = loss.mean()
-    #     elif reduction == "sum":
-    #         loss = loss.sum()
-    #
-    #     with open(os.path.join(global_cfg.OUTPUT_DIR, "weights‌.csv"), "a") as my_csv:
-    #         my_csv.write(f"sum loss after weighting: {loss}\n")
-    #
-    #     return NAKHW_loss, loss, weights
 
     def calc_log_metrics(self, betting_map, weights, loss_dict, loss_gambler, loss_before_weighting, data_time):
 
@@ -1042,7 +955,6 @@ class GANTrainer(TrainerBase):
         data_time = time.perf_counter() - start
 
         input_images, generated_output, gt_classes, loss_dict = self.detection_model(data)
-
         gambler_input, input_images = self.prepare_input_gambler(input_images, generated_output)
 
         if self.iter_G < self.max_iter_gambler:
@@ -1050,8 +962,6 @@ class GANTrainer(TrainerBase):
             betting_map = self.gambler_model(gambler_input)  # (N,AK,H,W)
             y, loss_before_weighting, loss_gambler, weights = self.sigmoid_gambler_loss(generated_output['pred_class_logits'], betting_map, gt_classes, normalize_w=self.cfg.MODEL.GAMBLER_HEAD.NORMALIZE, detach_pred=True)
 
-            # if self.vis_period > 0: #todo hooks
-                # storage = get_event_storage()
             if self.vis_period > 0 and self.storage.iter % self.vis_period == 0:
                 visualize_training(gt_classes, y, weights, input_images, self.storage)
 
@@ -1069,8 +979,6 @@ class GANTrainer(TrainerBase):
             betting_map = self.gambler_model(gambler_input)  # (N,AK,H,W)
             y, loss_before_weighting, loss_gambler, weights = self.sigmoid_gambler_loss(generated_output['pred_class_logits'], betting_map, gt_classes, normalize_w=self.cfg.MODEL.GAMBLER_HEAD.NORMALIZE, detach_pred=False)
 
-            # if self.vis_period > 0:
-                # storage = get_event_storage()
             if self.vis_period > 0 and self.storage.iter % self.vis_period == 0:
                 visualize_training(gt_classes, y, weights, input_images, self.storage)
 

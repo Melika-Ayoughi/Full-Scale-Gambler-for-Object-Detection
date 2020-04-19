@@ -14,7 +14,7 @@ MODEL:
     GAMBLER_OUTPUT: "B1HW" #"B1HW"
     GAMBLER_LAMBDA: 1 # GAMBLER_OUT_CHANNELS*w=28*h=40 #todo: need to change to actual h and w times scales
     GAMBLER_OUTSIDE_LAMBDA: 1
-    GAMBLER_TEMPERATURE: 1e-20 #epsilon is needed for divide by 0
+    GAMBLER_TEMPERATURE: 1e-20 #1e-20 epsilon is needed for divide by 0
     GAMBLER_LOSS_MODE: "focal"
     GAMBLER_OUT_CHANNELS: 1
     GAMBLER_IN_CHANNELS: 243 #3*80+3
@@ -45,4 +45,4 @@ INPUT:
   RESIZING: False
 DATALOADER:
     ASPECT_RATIO_GROUPING: False
-OUTPUT_DIR: "./output/gambler/compare_to_overfit_without_aspectratio_resizing"
+OUTPUT_DIR: "./output/gambler/exp_smoothinge-20"

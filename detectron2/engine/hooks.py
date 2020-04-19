@@ -229,6 +229,28 @@ class LRScheduler(HookBase):
         self._scheduler.step()
 
 
+class GamblerLRScheduler(LRScheduler):
+
+    def __init__(self, optimizer, scheduler):
+        super().__init__(optimizer, scheduler)
+
+    def after_step(self):
+        lr = self._optimizer.param_groups[self._best_param_group_id]["lr"]
+        self.trainer.storage.put_scalar("lr/gambler", lr, smoothing_hint=False)
+        self._scheduler.step()
+
+
+class DetectorLRScheduler(LRScheduler):
+
+    def __init__(self, optimizer, scheduler):
+        super().__init__(optimizer, scheduler)
+
+    def after_step(self):
+        lr = self._optimizer.param_groups[self._best_param_group_id]["lr"]
+        self.trainer.storage.put_scalar("lr/detector", lr, smoothing_hint=False)
+        self._scheduler.step()
+
+
 class AutogradProfiler(HookBase):
     """
     A hook which runs `torch.autograd.profiler.profile`.
