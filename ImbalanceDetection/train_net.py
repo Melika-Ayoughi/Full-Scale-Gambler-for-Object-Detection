@@ -154,7 +154,7 @@ def prepare_input_images(input_images, num_scales, device):
     pixel_std = torch.Tensor(global_cfg.MODEL.PIXEL_STD).to(device).view(3, 1, 1)
     denormalizer = lambda x: (x * pixel_std) + pixel_mean  # todo maybe normalized image is better
     input_images = denormalizer(input_images)
-    input_grid = make_grid(input_images / 255., nrow=2)
+    input_grid = make_grid(input_images / 255., nrow=2, pad_value=1)
     if num_scales > 1:
         input_grid = input_grid.repeat(1, num_scales, 1)
     return input_grid
@@ -175,7 +175,7 @@ def prepare_betting_map(betting_map, batch, num_scales, H, W, input_grid=None, h
             g_channel = torch.zeros_like(_bm)
             b_channel = torch.zeros_like(_bm)
             _bm = torch.cat((_bm, g_channel, b_channel), dim=1)
-        bm_list.append(make_grid(_bm, nrow=2))
+        bm_list.append(make_grid(_bm, nrow=2, pad_value=1))
     betting_map_grid = torch.cat(bm_list, dim=1)
 
     if input_grid is not None and heatmap_mode is True:
@@ -211,12 +211,15 @@ def visualize_training(gt_classes, loss, betting_map, input_images, storage):
     input_grid = prepare_input_images(input_images, 1, device)
 
     # Prepare betting map **********************************************************************************************
-    bets_and_input = prepare_betting_map(betting_map, n, len(anchor_scales[0]), h, w, input_grid=input_grid, heatmap_mode=False)
+    bets_and_input = prepare_betting_map(normalize_to_01(betting_map), n, len(anchor_scales[0]), h, w, input_grid=input_grid, heatmap_mode=False)
 
+    all_vis = []
+    all_vis.extend([bets_and_input, (normalize_to_01(loss_grid)).cpu().numpy(), input_grid.cpu().numpy()])
     vis = np.concatenate((bets_and_input, (normalize_to_01(loss_grid)).cpu().numpy(), input_grid.cpu().numpy()), axis=2) #todo: visualize gt as well
     storage.put_image("all", vis)
-    vis = vis.transpose(1, 2, 0)  # numpy images are (W,H,C)
-    return vis
+    for i, vis in enumerate(all_vis):
+        all_vis[i] = vis.transpose(1, 2, 0)  # numpy images are (W,H,C)
+    return all_vis
 
 
 class GANTrainer(TrainerBase):
@@ -926,15 +929,16 @@ class GANTrainer(TrainerBase):
 
         return loss_dict
 
-    def prepare_input_gambler(self, input_images, generated_output):
+    @staticmethod
+    def prepare_input_gambler(input_images, generated_output):
         stride = 16  # todo: stride depends on feature map layer
         input_images = F.interpolate(input_images, scale_factor=1 / stride, mode='bilinear')
         sigmoid_predictions = torch.sigmoid(generated_output['pred_class_logits'][0])
 
-        if self.cfg.MODEL.GAMBLER_HEAD.DATA_RANGE == [-0.5, 0.5]:
+        if global_cfg.MODEL.GAMBLER_HEAD.DATA_RANGE == [-0.5, 0.5]:
             scaled_prob = (sigmoid_predictions - 0.5)
             input_images = (input_images / 256.0)
-        elif self.cfg.MODEL.GAMBLER_HEAD.DATA_RANGE == [-128, 128]:
+        elif global_cfg.MODEL.GAMBLER_HEAD.DATA_RANGE == [-128, 128]:
             scaled_prob = (sigmoid_predictions - 0.5) * 256
 
         # concatenate along the channel

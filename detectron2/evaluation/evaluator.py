@@ -211,17 +211,17 @@ def inference_and_visualize(detector, gambler, data_loader=None, mode="dataloade
         with EventStorage(0) as storage:
             with torch.no_grad():
                 for idx, inputs in tqdm.tqdm(enumerate(data_loader)):
+                    if idx > 3:
+                        break
                     input_images, generated_output, gt_classes, loss_dict = detector(inputs)
-                    stride = 16
-                    input_images = F.interpolate(input_images, scale_factor=1 / stride, mode='bilinear')  # todo: stride depends on feature map layer
-                    sigmoid_predictions = torch.sigmoid(generated_output['pred_class_logits'][0])
-                    scaled_prob = (sigmoid_predictions - 0.5) * 256
-                    gambler_input = torch.cat((input_images, scaled_prob), dim=1)
+                    gambler_input, input_images = GANTrainer.prepare_input_gambler(input_images, generated_output)
                     betting_map = gambler(gambler_input)
 
                     y, loss_before_weighting, loss_gambler, weights = GANTrainer.sigmoid_gambler_loss(generated_output['pred_class_logits'], betting_map, gt_classes, normalize_w=global_cfg.MODEL.GAMBLER_HEAD.NORMALIZE)
-                    vis = visualize_training(gt_classes, y, weights, input_images, storage)
-                    output(vis, os.path.join(global_cfg.OUTPUT_DIR, "images", inputs[0]["file_name"].rsplit('/', 1)[1]))
+                    all_vis = visualize_training(gt_classes, y, weights, input_images, storage)
+                    for i, vis in enumerate(all_vis):
+                        # save .png to get rid of jpeg artifacts
+                        output(vis, os.path.join(global_cfg.OUTPUT_DIR, "images", inputs[0]["file_name"].rsplit('/', 1)[1].split('.', 1)[0] + '_' + str(i) +'.png'))
                     # for writer in periodic_writer._writers:
                     #     writer.write()
                     storage.step()
