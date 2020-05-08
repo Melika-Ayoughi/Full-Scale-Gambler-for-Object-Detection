@@ -7,11 +7,12 @@ MODEL:
     NUM_CLASSES: 80 #1230
 #    SCORE_THRESH_TEST: 0.0001
   ANCHOR_GENERATOR:
-    SIZES: !!python/object/apply:eval ["[[x * 2**(-5.0/6), x * 2**(-4.0/6), x * 2**(-3.0/6), x * 2**(-2.0/6), x * 2**(-1.0/6), x, x * 2**(1.0/6), x * 2**(2.0/6), x * 2**(3.0/6), x * 2**(4.0/6), x * 2**(5.0/6)] for x in [128]]"] #multiple scales
+#    SIZES: !!python/object/apply:eval ["[[x * 2**(-5.0/6), x * 2**(-4.0/6), x * 2**(-3.0/6), x * 2**(-2.0/6), x * 2**(-1.0/6), x, x * 2**(1.0/6), x * 2**(2.0/6), x * 2**(3.0/6), x * 2**(4.0/6), x * 2**(5.0/6)] for x in [128]]"] #multiple scales
+    SIZES: !!python/object/apply:eval ["[[x, x * 2**(1.0/3), x * 2**(2.0/3) ] for x in [32, 64, 128, 256, 512]]"]
     ASPECT_RATIOS: [[1.0]]  # 1 aspect ratio
   RETINANET:
     NUM_CLASSES: 80
-    IN_FEATURES: ["p4"] # 1 feature map layer - p3 is stride 8 - original retinanet ["p3", "p4", "p5", "p6", "p7"]
+    IN_FEATURES: ["p3", "p4", "p5", "p6", "p7"] # 1 feature map layer - p3 is stride 8 - original retinanet ["p3", "p4", "p5", "p6", "p7"]
   GAMBLER_HEAD:
     BASE_LR: 0.001
 #TEST:

@@ -20,7 +20,6 @@ from detectron2.checkpoint import DetectionCheckpointer
 from detectron2.engine import hooks
 from fvcore.nn.precise_bn import get_bn_modules
 import numpy as np
-from detectron2.layers import cat
 import torch.nn.functional as F
 from detectron2.config import set_global_cfg, global_cfg
 from detectron2.evaluation.coco_evaluation import COCOEvaluator
@@ -35,77 +34,8 @@ from detectron2.evaluation import (
 from detectron2.evaluation.lvis_evaluation import LVISEvaluator
 from collections import OrderedDict
 from detectron2.utils.events import CommonMetricPrinter, JSONWriter, TensorboardXWriter
-from detectron2.utils.events import get_event_storage
 from torchvision.utils import make_grid, save_image
 import matplotlib.pyplot as plt
-
-
-def N_AK_H_W_to_N_HWA_K(tensor, K):
-    """
-    Transpose/reshape a tensor from (N, (A x K), H, W) to (N, (HxWxA), K)
-    """
-    assert tensor.dim() == 4, tensor.shape
-    N, _, H, W = tensor.shape
-    tensor = tensor.view(N, -1, K, H, W)
-    tensor = tensor.permute(0, 3, 4, 1, 2)
-    tensor = tensor.reshape(N, -1, K)  # Size=(N,HWA,K)
-    return tensor
-
-
-def reverse_N_AK_H_W_to_N_HWA_K(tensor, N, H, W, K):
-    tensor = tensor.reshape(N, H, W, -1, K)  # Size=(N,H,W,A,K)
-    tensor = tensor.permute(0, 3, 4, 1, 2)
-    tensor = tensor.view(N, -1, H, W)
-    return tensor
-
-
-def permute_all_cls_to_NHWAxFPN_K_and_concat(box_cls, num_classes=80):
-    """
-    Rearrange the tensor layout from the network output, i.e.:
-    list[Tensor]: #lvl tensors of shape (N, A x K, Hi, Wi)
-    to per-image predictions, i.e.:
-    Tensor: of shape (N x sum(Hi x Wi x A), K)
-    """
-    # for each feature level, permute the outputs to make them be in the
-    # same format as the labels. Note that the labels are computed for
-    # all feature levels concatenated, so we keep the same representation
-    # for the objectness and the box_delta
-    box_cls_flattened = [N_AK_H_W_to_N_HWA_K(x, num_classes) for x in box_cls]
-    # box_delta_flattened = [permute_to_N_HWA_K(x, 4) for x in box_delta]
-    # concatenate on the first dimension (representing the feature levels), to
-    # take into account the way the labels were generated (with all feature maps
-    # being concatenated as well)
-    box_cls = cat(box_cls_flattened, dim=1).reshape(-1, num_classes)
-    return box_cls
-
-
-def reverse_permute_all_cls_to_N_HWA_K_and_concat(tensor, num_fpn_layers, N, H, W, num_classes=80):
-    tensor = tensor.reshape(N, -1, num_classes) # (n,h*w*a,k)
-    tensor = torch.chunk(tensor, num_fpn_layers, dim=1)  # todo not sure about this
-    tensor_prime = [reverse_N_AK_H_W_to_N_HWA_K(x, N, H, W, num_classes) for x in tensor]
-    return tensor_prime
-
-
-def permute_all_weights_to_N_HWA_K_and_concat(weights, num_classes=80, normalize_w= False):
-    """
-    Rearrange the tensor layout from the network output, i.e.:
-    list[Tensor]: #lvl tensors of shape (N, A x K, Hi, Wi)
-    to per-image predictions, i.e.:
-    Tensor: of shape (N x sum(Hi x Wi x A), K)
-    """
-    # for each feature level, permute the outputs to make them be in the
-    # same format as the labels. Note that the labels are computed for
-    # all feature levels concatenated, so we keep the same representation
-    # for the objectness and the box_delta
-    weights_flattened = [N_AK_H_W_to_N_HWA_K(w, num_classes) for w in weights] # Size=(N,HWA,K)
-    weights_flattened = [w + global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_TEMPERATURE for w in weights_flattened]
-    if normalize_w is True:
-        weights_flattened = [w / torch.sum(w, dim=[1,2], keepdim=True) for w in weights_flattened] #normalize by wxh only for now #todo experiment with normalizing across anchors -> distribute bets among scales maybe some are more important
-    # concatenate on the first dimension (representing the feature levels), to
-    # take into account the way the labels were generated (with all feature maps
-    # being concatenated as well)
-    weights_flattened = cat(weights_flattened, dim=1).reshape(-1, num_classes)
-    return weights_flattened
 
 
 def normalize_to_01(input):
@@ -806,105 +736,6 @@ class GANTrainer(TrainerBase):
                                                                                                   -1)) * self.gambler_loss_lambda
         return loss_gambler
 
-    @staticmethod
-    def sigmoid_gambler_loss(pred_class_logits, weights, gt_classes, normalize_w=False, detach_pred=False, reduction="sum"):
-        '''
-
-        Args:
-            pred_class_logits: list of tensors, each tensor is [batch, #class_categories * anchors per location, w, h]
-            weights: [batch, #anchors per location/#classes/ classes*anchors per location, w, h]
-            gt_classes: [batch, #all_anchors = w * h * anchors per location]
-            normalize_w:
-            detach_pred:
-
-        Returns:
-
-        '''
-        [N, AK, H, W] = pred_class_logits[0].shape
-        if detach_pred is True:
-            pred_class_logits = [p.detach() for p in pred_class_logits]
-
-        num_classes = global_cfg.MODEL.RETINANET.NUM_CLASSES
-
-        pred_class_logits = permute_all_cls_to_NHWAxFPN_K_and_concat(
-            pred_class_logits, num_classes
-        )  # Shapes: (N x R, K) and (N x R, 4), respectively.
-        gt_classes = gt_classes.flatten() #todo next: change the shape of gt to the proper shape
-        valid_idxs = gt_classes >= 0
-        foreground_idxs = (gt_classes >= 0) & (gt_classes != num_classes)
-        num_foreground = foreground_idxs.sum()
-
-        gt_classes_target = torch.zeros_like(pred_class_logits)
-        gt_classes_target[foreground_idxs, gt_classes[foreground_idxs]] = 1
-
-        p = torch.sigmoid(pred_class_logits)
-        ce_loss = F.binary_cross_entropy_with_logits(pred_class_logits, gt_classes_target, reduction="none") # (N x R, K)
-        p_t = p * gt_classes_target + (1 - p) * (1 - gt_classes_target)
-
-        mode = global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_LOSS_MODE
-        alpha = global_cfg.MODEL.RETINANET.FOCAL_LOSS_ALPHA
-        gamma = global_cfg.MODEL.RETINANET.FOCAL_LOSS_GAMMA
-
-        if mode == "focal":
-            gambler_loss = ce_loss * ((1 - p_t) ** gamma)
-            if alpha >= 0:
-                alpha_t = alpha * gt_classes_target + (1 - alpha) * (1 - gt_classes_target)
-                gambler_loss = alpha_t * gambler_loss
-        elif mode == "sigmoid":
-            gambler_loss = ce_loss
-        else:
-            logging.error("No mode it selected for the retinanet loss!!")
-            gambler_loss = None
-
-        # ignore the invalid ids in loss
-        valid_loss = torch.zeros_like(gambler_loss)  # todo: backprop
-        valid_loss[valid_idxs, :] = gambler_loss[valid_idxs, :]
-
-        gambler_loss = reverse_permute_all_cls_to_N_HWA_K_and_concat(valid_loss, 1, N, H, W, num_classes)  # N,AK,H,W_loss #todo num fpn layers
-
-        if global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "B1HW":
-            gambler_loss = [torch.sum(l, dim=[1], keepdim=True) for l in gambler_loss]  # aggregate over classes and anchors
-            NAKHW_loss = [l.clone().detach() for l in gambler_loss]
-            gambler_loss = permute_all_cls_to_NHWAxFPN_K_and_concat(gambler_loss, num_classes=1)
-            # loss = [torch.sum(l, dim=[1,2], keepdim=True) for l in loss] # aggregate over classes and anchors #todo seperate classes and anchors
-        elif global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "BCHW":
-            gambler_loss = [torch.sum(l, dim=[1], keepdim=True) for l in gambler_loss]  # aggregate over anchors
-        elif global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "BAHW":
-            gambler_loss = [torch.sum(l, dim=[2], keepdim=True) for l in gambler_loss]  # aggregate over classes
-        elif global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "BCAHW":
-            gambler_loss = gambler_loss  # do nothing
-
-        storage = get_event_storage()
-        with open(os.path.join(global_cfg.OUTPUT_DIR, "weights‌.csv"), "a") as my_csv:
-            max_loss = []
-            max_weights = []
-            for i in range(N):
-                assert len(NAKHW_loss) == 1, "csv write does not work for full fpn layer!"
-                max_loss.append(NAKHW_loss[0][i, :, :, :].max().detach().cpu().numpy())
-                max_weights.append(weights[i, :, :, :].max().detach().cpu().numpy())
-                my_csv.write(
-                    f"iteration: {str(storage.iter)}, image: {str(i)}, max weight: {max_weights[-1]},‌ max loss: {max_loss[-1]}, "
-                    f"loss where weight is max: {NAKHW_loss[0][i, :, :, :].flatten()[weights[i, :, :, :].argmax()].item()}, weight where loss is max: {weights[i, :, :, :].flatten()[NAKHW_loss[0][i, :, :, :].argmax()].item()},"
-                    f"weight argmax: {weights[i, :, :, :].argmax()}, loss argmax: {NAKHW_loss[0][i, :, :, :].argmax()}\n")
-
-        storage.put_scalar("sum/max_loss", np.sum(np.array(max_loss)))  # sum over the batch
-        storage.put_scalar("sum/max_weight", np.sum(np.array(max_weights)))  # sum over the batch
-
-        weights = permute_all_weights_to_N_HWA_K_and_concat([weights], 1, normalize_w)  # todo hardcoded 3: scales
-        gambler_loss = -weights * gambler_loss
-
-        if reduction == "mean":
-            gambler_loss = gambler_loss.mean()
-        elif reduction == "sum":
-            gambler_loss = gambler_loss.sum()
-
-        with open(os.path.join(global_cfg.OUTPUT_DIR, "weights‌.csv"), "a") as my_csv:
-            my_csv.write(f"sum loss after weighting: {gambler_loss}\n")
-
-        loss_before_weighting = [loss.sum() for loss in NAKHW_loss]
-
-        return NAKHW_loss, sum(loss_before_weighting)/max(1, num_foreground), gambler_loss, weights.data
-
     def calc_log_metrics(self, betting_map, weights, loss_dict, loss_gambler, loss_before_weighting, data_time):
 
         loss_dict.update({"loss_box_reg": loss_dict["loss_box_reg"] * self.regression_loss_lambda})
@@ -930,20 +761,31 @@ class GANTrainer(TrainerBase):
         return loss_dict
 
     @staticmethod
-    def prepare_input_gambler(input_images, generated_output):
-        stride = 16  # todo: stride depends on feature map layer
-        input_images = F.interpolate(input_images, scale_factor=1 / stride, mode='bilinear')
-        sigmoid_predictions = torch.sigmoid(generated_output['pred_class_logits'][0])
+    def prepare_input_gambler(cfg, generated_output, input_images):
+        if len(cfg.MODEL.RETINANET.IN_FEATURES) > 1:
+            logging.debug("Mode: multiple FPN layers")
+            if global_cfg.MODEL.GAMBLER_HEAD.DATA_RANGE == [-0.5, 0.5]:
+                scaled_prob = [torch.sigmoid(pred) - 0.5 for pred in generated_output['pred_class_logits']]
+            elif global_cfg.MODEL.GAMBLER_HEAD.DATA_RANGE == [-128, 128]:
+                scaled_prob = [(torch.sigmoid(pred) - 0.5) * 256 for pred in generated_output['pred_class_logits']]
+            return scaled_prob, input_images
+        else:
+            logging.debug("Mode: one FPN layer")
+            if input_images is None:
+                raise Exception("one fpn layer always needs the input image for concatenation!")
+            stride = 16  # todo: stride depends on feature map layer
+            input_images = F.interpolate(input_images, scale_factor=1 / stride, mode='bilinear')
+            sigmoid_predictions = torch.sigmoid(generated_output['pred_class_logits'][0])
 
-        if global_cfg.MODEL.GAMBLER_HEAD.DATA_RANGE == [-0.5, 0.5]:
-            scaled_prob = (sigmoid_predictions - 0.5)
-            input_images = (input_images / 256.0)
-        elif global_cfg.MODEL.GAMBLER_HEAD.DATA_RANGE == [-128, 128]:
-            scaled_prob = (sigmoid_predictions - 0.5) * 256
+            if global_cfg.MODEL.GAMBLER_HEAD.DATA_RANGE == [-0.5, 0.5]:
+                scaled_prob = (sigmoid_predictions - 0.5)
+                input_images = (input_images / 256.0)
+            elif global_cfg.MODEL.GAMBLER_HEAD.DATA_RANGE == [-128, 128]:
+                scaled_prob = (sigmoid_predictions - 0.5) * 256
 
-        # concatenate along the channel
-        gambler_input = torch.cat((input_images, scaled_prob), dim=1)  # (N,3+AK,H,W)
-        return gambler_input, input_images
+            # concatenate along the channel
+            gambler_input = torch.cat((input_images, scaled_prob), dim=1)  # (N,3+AK,H,W)
+            return gambler_input, input_images
 
     def run_step(self):
         """
@@ -959,12 +801,12 @@ class GANTrainer(TrainerBase):
         data_time = time.perf_counter() - start
 
         input_images, generated_output, gt_classes, loss_dict = self.detection_model(data)
-        gambler_input, input_images = self.prepare_input_gambler(input_images, generated_output)
+        gambler_input, gambler_image = self.prepare_input_gambler(self.cfg, generated_output, input_images)
 
         if self.iter_G < self.max_iter_gambler:
             logger.info(f"Iteration {self.iter} in Gambler")
-            betting_map = self.gambler_model(gambler_input)  # (N,AK,H,W)
-            y, loss_before_weighting, loss_gambler, weights = self.sigmoid_gambler_loss(generated_output['pred_class_logits'], betting_map, gt_classes, normalize_w=self.cfg.MODEL.GAMBLER_HEAD.NORMALIZE, detach_pred=True)
+            betting_map = self.gambler_model(gambler_input, gambler_image)  # (N,AK,H,W)
+            y, loss_before_weighting, loss_gambler, weights = self.gambler_model.sigmoid_gambler_loss(generated_output['pred_class_logits'], betting_map, gt_classes, normalize_w=self.cfg.MODEL.GAMBLER_HEAD.NORMALIZE, detach_pred=True)
 
             if self.vis_period > 0 and self.storage.iter % self.vis_period == 0:
                 visualize_training(gt_classes, y, weights, input_images, self.storage)
@@ -981,7 +823,7 @@ class GANTrainer(TrainerBase):
         elif self.iter_D < self.max_iter_detector:
             logger.info(f"Iteration {self.iter} in Detector")
             betting_map = self.gambler_model(gambler_input)  # (N,AK,H,W)
-            y, loss_before_weighting, loss_gambler, weights = self.sigmoid_gambler_loss(generated_output['pred_class_logits'], betting_map, gt_classes, normalize_w=self.cfg.MODEL.GAMBLER_HEAD.NORMALIZE, detach_pred=False)
+            y, loss_before_weighting, loss_gambler, weights = self.gambler_model.sigmoid_gambler_loss(generated_output['pred_class_logits'], betting_map, gt_classes, normalize_w=self.cfg.MODEL.GAMBLER_HEAD.NORMALIZE, detach_pred=False)
 
             if self.vis_period > 0 and self.storage.iter % self.vis_period == 0:
                 visualize_training(gt_classes, y, weights, input_images, self.storage)
