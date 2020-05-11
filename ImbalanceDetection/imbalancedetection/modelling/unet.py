@@ -107,27 +107,27 @@ class LayeredUnet(nn.Module):
         layered_output = []
 
         x1 = self.inc(torch.cat((layered_x[0], image), dim=1))
-        print(f"x1: {x1.shape}")
+        # print(f"x1: {x1.shape}")
         x2 = self.down1(layered_x[1], x1)
-        print(f"x2: {x2.shape}")
+        # print(f"x2: {x2.shape}")
         x3 = self.down2(layered_x[2], x2)
-        print(f"x3: {x3.shape}")
+        # print(f"x3: {x3.shape}")
         x4 = self.down3(layered_x[3], x3)
-        print(f"x4: {x4.shape}")
+        # print(f"x4: {x4.shape}")
         x5 = self.down4(layered_x[4], x4)
-        print(f"x5: {x5.shape}")
+        # print(f"x5: {x5.shape}")
         layered_output.append(x5)
         o1 = self.up1(x5, x4)
-        print(f"o1: {o1.shape}")
+        # print(f"o1: {o1.shape}")
         layered_output.append(o1)
         o2 = self.up2(o1, x3)
-        print(f"o2: {o2.shape}")
+        # print(f"o2: {o2.shape}")
         layered_output.append(o2)
         o3 = self.up3(o2, x2)
-        print(f"o3: {o3.shape}")
+        # print(f"o3: {o3.shape}")
         layered_output.append(o3)
         o4 = self.up4(o3, x1)
-        print(f"o4: {o4.shape}")
+        # print(f"o4: {o4.shape}")
         layered_output.append(o4)
 
         return layered_output
@@ -175,7 +175,7 @@ class DownCat(nn.Module):
 
     def forward(self, pred, x):
         out1 = self.maxpool(x)
-        print(f"prediction channels: {pred.shape} unet channels: {out1.shape}")
+        # print(f"prediction channels: {pred.shape} unet channels: {out1.shape}")
         out2 = torch.cat([pred, out1], dim=1)
         return self.conv(out2)
 

@@ -152,6 +152,60 @@ def visualize_training(gt_classes, loss, betting_map, input_images, storage):
     return all_vis
 
 
+def visualize_training_(gt_classes, loss, betting_map, input_images, storage):
+    '''
+
+    Args:
+        gt_classes: tensor[N, Ax(H1xW1+...+H5xW5)]
+        loss: list[tensor[N, A, K, H, W]]
+        betting_map: tensor[NxAx(H1xW1+...+H5xW5), K]
+        input_images: tensor[N, 3, 640, 640]
+        storage:
+
+    Returns:
+
+    '''
+
+    assert global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "L_BCAHW"
+    os.makedirs(os.path.join(global_cfg.OUTPUT_DIR,
+                             "images",
+                             "epoch_" + storage.iter,
+                             "input"), exist_ok=True)
+
+    device = torch.device(global_cfg.MODEL.DEVICE)
+    anchor_scales = global_cfg.MODEL.ANCHOR_GENERATOR.SIZES
+
+    def output(vis, filepath):
+        print("Saving to {} ...".format(filepath))
+        # vis.save(filepath)
+        plt.imsave(filepath, vis)
+
+    if len(loss) > 1:
+        raise Exception("The code still does not support the full FPN layers!")
+    loss = loss[0] #todo: change for multiple fpn layers
+    [n, _, h, w] = loss.shape
+
+    # Prepare loss *****************************************************************************************************
+    loss_grid = prepare_loss_grid(loss, len(anchor_scales[0]))
+
+    # Prepare ground truth *********************************************************************************************
+    gt_grid = prepare_gt_grid(gt_classes, n, len(anchor_scales[0]), h, w, device)
+
+    # Prepare input images *********************************************************************************************
+    input_grid = prepare_input_images(input_images, 1, device)
+
+    # Prepare betting map **********************************************************************************************
+    bets_and_input = prepare_betting_map(normalize_to_01(betting_map), n, len(anchor_scales[0]), h, w, input_grid=input_grid, heatmap_mode=False)
+
+    all_vis = []
+    all_vis.extend([bets_and_input, (normalize_to_01(loss_grid)).cpu().numpy(), input_grid.cpu().numpy()])
+    vis = np.concatenate((bets_and_input, (normalize_to_01(loss_grid)).cpu().numpy(), input_grid.cpu().numpy()), axis=2) #todo: visualize gt as well
+    storage.put_image("all", vis)
+    for i, vis in enumerate(all_vis):
+        all_vis[i] = vis.transpose(1, 2, 0)  # numpy images are (W,H,C)
+    return all_vis
+
+
 class GANTrainer(TrainerBase):
 
     def __init__(self, cfg):
@@ -748,10 +802,20 @@ class GANTrainer(TrainerBase):
         self._detect_anomaly(loss_detector, loss_dict)
         self._detect_anomaly(loss_gambler, loss_dict)
 
-        loss_dict["gambler_bets/sum"] = torch.sum(betting_map)
-        loss_dict["gambler_bets/max"] = torch.max(betting_map)
-        loss_dict["gambler_bets/mean"] = torch.mean(betting_map)
-        loss_dict["gambler_bets/median"] = torch.median(betting_map)
+        sum_bets_all_layers = 0
+        max_bets_all_layers = 0
+        num_elements = 0
+        for b in betting_map:
+            sum_bets_all_layers = sum_bets_all_layers + torch.sum(b)
+            num_elements = num_elements + torch.numel(b)
+            if torch.max(b) > max_bets_all_layers:
+                max_bets_all_layers = torch.max(b)
+        avg_bets_all_layers = sum_bets_all_layers / num_elements
+
+        loss_dict["gambler_bets/sum"] = sum_bets_all_layers
+        loss_dict["gambler_bets/max"] = max_bets_all_layers
+        loss_dict["gambler_bets/mean"] = avg_bets_all_layers
+        # loss_dict["gambler_bets/median"] = torch.median(betting_map)
         loss_dict["visualized weights/sum"] = torch.sum(weights)
         loss_dict["visualized weights/max"] = torch.max(weights)
         loss_dict["visualized weights/mean"] = torch.mean(weights)
@@ -806,10 +870,10 @@ class GANTrainer(TrainerBase):
         if self.iter_G < self.max_iter_gambler:
             logger.info(f"Iteration {self.iter} in Gambler")
             betting_map = self.gambler_model(gambler_input, gambler_image)  # (N,AK,H,W)
-            y, loss_before_weighting, loss_gambler, weights = self.gambler_model.sigmoid_gambler_loss(generated_output['pred_class_logits'], betting_map, gt_classes, normalize_w=self.cfg.MODEL.GAMBLER_HEAD.NORMALIZE, detach_pred=True)
+            loss_nakhw, loss_before_weighting, loss_gambler, weights = self.gambler_model.sigmoid_gambler_loss(generated_output['pred_class_logits'], betting_map, gt_classes, normalize_w=self.cfg.MODEL.GAMBLER_HEAD.NORMALIZE, detach_pred=True)
 
             if self.vis_period > 0 and self.storage.iter % self.vis_period == 0:
-                visualize_training(gt_classes, y, weights, input_images, self.storage)
+                visualize_training_(gt_classes, loss_nakhw, weights, input_images, self.storage)
 
             metrics_dict = self.calc_log_metrics(betting_map, weights, loss_dict, loss_gambler, loss_before_weighting, data_time)
 
@@ -823,10 +887,10 @@ class GANTrainer(TrainerBase):
         elif self.iter_D < self.max_iter_detector:
             logger.info(f"Iteration {self.iter} in Detector")
             betting_map = self.gambler_model(gambler_input)  # (N,AK,H,W)
-            y, loss_before_weighting, loss_gambler, weights = self.gambler_model.sigmoid_gambler_loss(generated_output['pred_class_logits'], betting_map, gt_classes, normalize_w=self.cfg.MODEL.GAMBLER_HEAD.NORMALIZE, detach_pred=False)
+            loss_nakhw, loss_before_weighting, loss_gambler, weights = self.gambler_model.sigmoid_gambler_loss(generated_output['pred_class_logits'], betting_map, gt_classes, normalize_w=self.cfg.MODEL.GAMBLER_HEAD.NORMALIZE, detach_pred=False)
 
             if self.vis_period > 0 and self.storage.iter % self.vis_period == 0:
-                visualize_training(gt_classes, y, weights, input_images, self.storage)
+                visualize_training(gt_classes, loss_nakhw, weights, input_images, self.storage)
 
             metrics_dict = self.calc_log_metrics(betting_map, weights, loss_dict, loss_gambler, loss_before_weighting, data_time)
 

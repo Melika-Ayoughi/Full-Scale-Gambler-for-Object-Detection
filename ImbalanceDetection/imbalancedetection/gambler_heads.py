@@ -116,6 +116,31 @@ class GamblerHeads(torch.nn.Module):
         weights_flattened = cat(weights_flattened, dim=1).reshape(-1, num_classes)
         return weights_flattened
 
+    def permute_all_weights_to_N_HWA_K_and_concat_(self, weights, num_classes=80, normalize_w=False):
+        """
+        Rearrange the tensor layout from the network output, i.e.:
+        list[Tensor]: #lvl tensors of shape (N, A x K, Hi, Wi)
+        to per-image predictions, i.e.:
+        Tensor: of shape (N x sum(Hi x Wi x A), K)
+        """
+        # for each feature level, permute the outputs to make them be in the
+        # same format as the labels. Note that the labels are computed for
+        # all feature levels concatenated, so we keep the same representation
+        # for the objectness and the box_delta
+        weights_flattened = [N_AK_H_W_to_N_HWA_K(w, num_classes) for w in weights]  # Size=(N,HWA,K)
+        weights_flattened = [w + self.cfg.MODEL.GAMBLER_HEAD.GAMBLER_TEMPERATURE for w in weights_flattened]
+        if normalize_w is True:
+            sum_all_layers = 0
+            for w in weights_flattened:
+                sum_all_layers = sum_all_layers + torch.sum(w, dim=[1, 2], keepdim=True)
+
+            weights_flattened = [w / sum_all_layers for w in weights_flattened]  # normalize by anchor, class and layer
+        # concatenate on the first dimension (representing the feature levels), to
+        # take into account the way the labels were generated (with all feature maps
+        # being concatenated as well)
+        weights_flattened = cat(weights_flattened, dim=1).reshape(-1, num_classes)
+        return weights_flattened
+
 
 @GAMBLER_HEAD_REGISTRY.register()
 class UnetGambler(GamblerHeads):
@@ -343,7 +368,7 @@ class LayeredUnetGambler(GamblerHeads):
             gambler_loss = self.reverse_permute_all_cls_to_N_HWA_K_and_concat_(valid_loss, self.cfg.MODEL.GAMBLER_HEAD.IN_LAYERS, N, [80,40,20,10,5], [80,40,20,10,5], num_classes)
             NAKHW_loss = [l.clone().detach() for l in gambler_loss]
             gambler_loss = self.permute_all_cls_to_NHWAxFPN_K_and_concat(gambler_loss, num_classes=num_classes)
-            weights = self.permute_all_weights_to_N_HWA_K_and_concat(weights, num_classes=num_classes, normalize_w=normalize_w)
+            weights = self.permute_all_weights_to_N_HWA_K_and_concat_(weights, num_classes=num_classes, normalize_w=normalize_w)
 
         # storage = get_event_storage()
         # with open(os.path.join(self.cfg.OUTPUT_DIR, "weights‌.csv"), "a") as my_csv:

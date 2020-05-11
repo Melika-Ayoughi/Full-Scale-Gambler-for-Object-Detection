@@ -16,7 +16,7 @@ MODEL:
     GAMBLER_ITERATIONS: 100
     DETECTOR_ITERATIONS: 0
     GAMBLER_OUTPUT: "L_BCAHW" #"B1HW"
-    GAMBLER_LAMBDA: 1 # GAMBLER_OUT_CHANNELS*w=28*h=40 #todo: need to change to actual h and w times scales
+    GAMBLER_LAMBDA: 350 # GAMBLER_OUT_CHANNELS*w=28*h=40 #todo: need to change to actual h and w times scales
     GAMBLER_OUTSIDE_LAMBDA: 1
     GAMBLER_TEMPERATURE: 1e-20 #1e-20 epsilon is needed for divide by 0
     GAMBLER_LOSS_MODE: "focal"

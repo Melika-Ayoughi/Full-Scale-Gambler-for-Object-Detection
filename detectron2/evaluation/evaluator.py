@@ -189,7 +189,7 @@ def inference_and_visualize(detector, gambler, data_loader=None, mode="dataloade
         The return value of `evaluator.evaluate()`
     """
     import torch.nn.functional as F
-    from train_net import GANTrainer, visualize_training
+    from train_net import GANTrainer, visualize_training, visualize_training_
     import os
     from detectron2.utils.events import EventStorage
     from detectron2.utils.events import CommonMetricPrinter, JSONWriter, TensorboardXWriter
@@ -214,11 +214,14 @@ def inference_and_visualize(detector, gambler, data_loader=None, mode="dataloade
                     if idx > 3:
                         break
                     input_images, generated_output, gt_classes, loss_dict = detector(inputs)
-                    gambler_input, input_images = GANTrainer.prepare_input_gambler(input_images, generated_output)
-                    betting_map = gambler(gambler_input)
+                    gambler_input, gambler_image = gambler.prepare_input_gambler(global_cfg, generated_output, input_images)
+                    betting_map = gambler(gambler_input, gambler_image)
 
-                    y, loss_before_weighting, loss_gambler, weights = GANTrainer.sigmoid_gambler_loss(generated_output['pred_class_logits'], betting_map, gt_classes, normalize_w=global_cfg.MODEL.GAMBLER_HEAD.NORMALIZE)
-                    all_vis = visualize_training(gt_classes, y, weights, input_images, storage)
+                    loss_nakhw, loss_before_weighting, loss_gambler, weights = gambler.sigmoid_gambler_loss(
+                        generated_output['pred_class_logits'], betting_map, gt_classes,
+                        normalize_w=global_cfg.MODEL.GAMBLER_HEAD.NORMALIZE, detach_pred=True)
+
+                    all_vis = visualize_training_(gt_classes, loss_nakhw, weights, input_images, storage)
                     for i, vis in enumerate(all_vis):
                         # save .png to get rid of jpeg artifacts
                         output(vis, os.path.join(global_cfg.OUTPUT_DIR, "images", inputs[0]["file_name"].rsplit('/', 1)[1].split('.', 1)[0] + '_' + str(i) +'.png'))
