@@ -43,6 +43,46 @@ def reverse_N_A_K_H_W_to_N_HWA_K(tensor, N, H, W, K):
     return tensor
 
 
+def list_N_AK_H_W_to_NsumHWA_K(box_cls, num_classes=80):
+    """
+    Rearrange the tensor layout from the network output, i.e.:
+    list[Tensor]: #lvl tensors of shape (N, A x K, Hi, Wi)
+    to per-image predictions, i.e.:
+    Tensor: of shape (N x sum(Hi x Wi x A), K)
+    """
+    # for each feature level, permute the outputs to make them be in the
+    # same format as the labels. Note that the labels are computed for
+    # all feature levels concatenated, so we keep the same representation
+    # for the objectness and the box_delta
+    box_cls_flattened = [N_AK_H_W_to_N_HWA_K(x, num_classes) for x in box_cls]
+    # box_delta_flattened = [permute_to_N_HWA_K(x, 4) for x in box_delta]
+    # concatenate on the first dimension (representing the feature levels), to
+    # take into account the way the labels were generated (with all feature maps
+    # being concatenated as well)
+    box_cls = cat(box_cls_flattened, dim=1).reshape(-1, num_classes)
+    return box_cls
+
+
+def reverse_list_N_AK_H_W_to_NsumHWA_K(tensor, num_fpn_layers, N, H, W, num_classes=80):
+    tensor = tensor.reshape(N, -1, num_classes)  # (n,h*w*a,k)
+    tensor = torch.chunk(tensor, num_fpn_layers, dim=1)
+    tensor_prime = [reverse_N_AK_H_W_to_N_HWA_K(x, N, H, W, num_classes) for x in tensor]
+    return tensor_prime
+
+
+def reverse_list_N_A_K_H_W_to_NsumHWA_K_(tensor, in_layers, N, H, W, num_classes=80):
+    tensor = tensor.reshape(N, -1, num_classes)  # (n,h*w*a,k)
+    if len(in_layers) == 1:  # 1 fpn layer
+        assert isinstance(H, int)
+        tensor = torch.chunk(tensor, len(in_layers), dim=1)
+        tensor_prime = [reverse_N_A_K_H_W_to_N_HWA_K(t, N, H, W, num_classes) for t in tensor]
+    else:  # multiple fpn layers
+        assert isinstance(H, list)
+        tensor = torch.split(tensor, [h * w * 3 for h, w in zip(H, W)], dim=1)
+        tensor_prime = [reverse_N_A_K_H_W_to_N_HWA_K(t, N, h, w, num_classes) for t, h, w in zip(tensor, H, W)]
+    return tensor_prime
+
+
 class GamblerHeads(torch.nn.Module):
     def __init__(self, cfg):
         super().__init__()
@@ -51,49 +91,6 @@ class GamblerHeads(torch.nn.Module):
         self.in_channels = cfg.MODEL.GAMBLER_HEAD.GAMBLER_IN_CHANNELS
         self.out_channels = cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUT_CHANNELS
         self.bilinear = cfg.MODEL.GAMBLER_HEAD.BILINEAR_UPSAMPLING
-
-    def permute_all_cls_to_NHWAxFPN_K_and_concat(self, box_cls, num_classes=80):
-        """
-        Rearrange the tensor layout from the network output, i.e.:
-        list[Tensor]: #lvl tensors of shape (N, A x K, Hi, Wi)
-        to per-image predictions, i.e.:
-        Tensor: of shape (N x sum(Hi x Wi x A), K)
-        """
-        # for each feature level, permute the outputs to make them be in the
-        # same format as the labels. Note that the labels are computed for
-        # all feature levels concatenated, so we keep the same representation
-        # for the objectness and the box_delta
-        box_cls_flattened = [N_AK_H_W_to_N_HWA_K(x, num_classes) for x in box_cls]
-        # box_delta_flattened = [permute_to_N_HWA_K(x, 4) for x in box_delta]
-        # concatenate on the first dimension (representing the feature levels), to
-        # take into account the way the labels were generated (with all feature maps
-        # being concatenated as well)
-        box_cls = cat(box_cls_flattened, dim=1).reshape(-1, num_classes)
-        return box_cls
-
-    def reverse_permute_all_cls_to_N_HWA_K_and_concat(self, tensor, num_fpn_layers, N, H, W, num_classes=80):
-        tensor = tensor.reshape(N, -1, num_classes)  # (n,h*w*a,k)
-        tensor = torch.chunk(tensor, num_fpn_layers, dim=1)  # todo not sure about this
-        tensor_prime = [reverse_N_AK_H_W_to_N_HWA_K(x, N, H, W, num_classes) for x in tensor]
-        return tensor_prime
-    
-    def reverse_permute_all_cls_to_N_HWA_K_and_concat_(self, tensor, in_layers, N, H, W, num_classes=80):
-        tensor = tensor.reshape(N, -1, num_classes)  # (n,h*w*a,k)
-        if len(in_layers) == 1: # 1 fpn layer
-            assert isinstance(H, int)
-            tensor = torch.chunk(tensor, len(in_layers), dim=1)  # todo not sure about this
-            tensor_prime = [reverse_N_A_K_H_W_to_N_HWA_K(t, N, H, W, num_classes) for t in tensor]
-        else: # multiple fpn layers
-            assert isinstance(H, list)
-            tensor = torch.split(tensor, [h*w*3 for h, w in zip(H,W)], dim=1)  # todo not sure about this output, is tensor a list or tuple??
-            tensor_prime = [reverse_N_A_K_H_W_to_N_HWA_K(t, N, h, w, num_classes) for t, h, w in zip(tensor, H, W)]
-        return tensor_prime
-
-    def reverse_permute_gt_to_N_HWA_K(self, tensor, num_fpn_layers, N, H, W, num_classes=80):
-        tensor = tensor.reshape(N, -1, num_classes)  # (n,h*w*a,k)
-        tensor = torch.chunk(tensor, num_fpn_layers, dim=1)  # todo not sure about this
-        tensor_prime = [reverse_N_AK_H_W_to_N_HWA_K(x, N, H, W, num_classes) for x in tensor]
-        return tensor_prime
 
     def permute_all_weights_to_N_HWA_K_and_concat(self, weights, num_classes=80, normalize_w=False):
         """
@@ -172,7 +169,7 @@ class UnetGambler(GamblerHeads):
 
         num_classes = self.cfg.MODEL.RETINANET.NUM_CLASSES
 
-        pred_class_logits = self.permute_all_cls_to_NHWAxFPN_K_and_concat(
+        pred_class_logits = list_N_AK_H_W_to_NsumHWA_K(
             pred_class_logits, num_classes
         )  # Shapes: (N x R, K) and (N x R, 4), respectively.
         gt_classes = gt_classes.flatten() #todo next: change the shape of gt to the proper shape
@@ -206,12 +203,12 @@ class UnetGambler(GamblerHeads):
         valid_loss = torch.zeros_like(gambler_loss)  # todo: backprop
         valid_loss[valid_idxs, :] = gambler_loss[valid_idxs, :]
 
-        gambler_loss = self.reverse_permute_all_cls_to_N_HWA_K_and_concat(valid_loss, 1, N, H, W, num_classes)  # N,AK,H,W_loss #todo num fpn layers
+        gambler_loss = reverse_list_N_AK_H_W_to_NsumHWA_K(valid_loss, 1, N, H, W, num_classes)  # N,AK,H,W_loss #todo num fpn layers
 
         if self.cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "B1HW":
             gambler_loss = [torch.sum(l, dim=[1], keepdim=True) for l in gambler_loss]  # aggregate over classes and anchors
             NAKHW_loss = [l.clone().detach() for l in gambler_loss]
-            gambler_loss = self.permute_all_cls_to_NHWAxFPN_K_and_concat(gambler_loss, num_classes=1)
+            gambler_loss = list_N_AK_H_W_to_NsumHWA_K(gambler_loss, num_classes=1)
             # loss = [torch.sum(l, dim=[1,2], keepdim=True) for l in loss] # aggregate over classes and anchors #todo seperate classes and anchors
         elif self.cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "BCHW":
             gambler_loss = [torch.sum(l, dim=[1], keepdim=True) for l in gambler_loss]  # aggregate over anchors
@@ -298,7 +295,7 @@ class LayeredUnetGambler(GamblerHeads):
 
         num_classes = self.cfg.MODEL.GAMBLER_HEAD.NUM_CLASSES
 
-        pred_class_logits = self.permute_all_cls_to_NHWAxFPN_K_and_concat(
+        pred_class_logits = list_N_AK_H_W_to_NsumHWA_K(
             pred_class_logits, num_classes
         )  # Shapes: (N x R, K) and (N x R, 4), respectively.
         gt_classes = gt_classes.flatten() #todo next: change the shape of gt to the proper shape
@@ -332,45 +329,60 @@ class LayeredUnetGambler(GamblerHeads):
         valid_loss = torch.zeros_like(gambler_loss)  # todo: backprop
         valid_loss[valid_idxs, :] = gambler_loss[valid_idxs, :]
 
-        # gambler_loss = self.reverse_permute_all_cls_to_N_HWA_K_and_concat(valid_loss, 1, N, H, W, num_classes)  # N,AK,H,W_loss #todo num fpn layers
         #todo function to get size of H & W from the predictions
 
         if self.cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "B1HW":
             # gambler loss: ‌N,AK,H,W
-            gambler_loss = self.reverse_permute_all_cls_to_N_HWA_K_and_concat_(valid_loss, self.cfg.MODEL.GAMBLER_HEAD.IN_LAYERS, N, H, W, num_classes)
+            gambler_loss = reverse_list_N_A_K_H_W_to_NsumHWA_K_(valid_loss, self.cfg.MODEL.GAMBLER_HEAD.IN_LAYERS, N, H, W, num_classes)
             # aggregate over classes and anchors
             gambler_loss = [torch.sum(l, dim=[1, 2])[:, None, :, :] for l in gambler_loss]
             NAKHW_loss = [l.clone().detach() for l in gambler_loss]
-            gambler_loss = self.permute_all_cls_to_NHWAxFPN_K_and_concat(gambler_loss, num_classes=1)
+            gambler_loss = list_N_AK_H_W_to_NsumHWA_K(gambler_loss, num_classes=1)
             weights = self.permute_all_weights_to_N_HWA_K_and_concat([weights], num_classes=1, normalize_w=normalize_w)
         elif self.cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "BCHW":
             # gambler loss: ‌N,AK,H,W
-            gambler_loss = self.reverse_permute_all_cls_to_N_HWA_K_and_concat_(valid_loss, self.cfg.MODEL.GAMBLER_HEAD.IN_LAYERS, N, H, W, num_classes)
+            gambler_loss = reverse_list_N_A_K_H_W_to_NsumHWA_K_(valid_loss, self.cfg.MODEL.GAMBLER_HEAD.IN_LAYERS, N, H, W, num_classes)
             # aggregate over anchors
             gambler_loss = [torch.sum(l, dim=[1], keepdim=True) for l in gambler_loss]
             NAKHW_loss = [l.clone().detach() for l in gambler_loss]
-            gambler_loss = self.permute_all_cls_to_NHWAxFPN_K_and_concat(gambler_loss, num_classes=num_classes)
+            gambler_loss = list_N_AK_H_W_to_NsumHWA_K(gambler_loss, num_classes=num_classes)
             weights = self.permute_all_weights_to_N_HWA_K_and_concat([weights], num_classes=num_classes, normalize_w=normalize_w)
         elif self.cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "BAHW":
             # gambler loss: ‌N,AK,H,W
-            gambler_loss = self.reverse_permute_all_cls_to_N_HWA_K_and_concat_(valid_loss, self.cfg.MODEL.GAMBLER_HEAD.IN_LAYERS, N, H, W, num_classes)
+            gambler_loss = reverse_list_N_A_K_H_W_to_NsumHWA_K_(valid_loss, self.cfg.MODEL.GAMBLER_HEAD.IN_LAYERS, N, H, W, num_classes)
             # aggregate over classes
             gambler_loss = [torch.sum(l, dim=[2], keepdim=True) for l in gambler_loss]
             NAKHW_loss = [l.clone().detach() for l in gambler_loss]
-            gambler_loss = self.permute_all_cls_to_NHWAxFPN_K_and_concat(gambler_loss, num_classes=1)
+            gambler_loss = list_N_AK_H_W_to_NsumHWA_K(gambler_loss, num_classes=1)
             weights = self.permute_all_weights_to_N_HWA_K_and_concat([weights], num_classes=1, normalize_w=normalize_w)
         elif self.cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "BCAHW":
-            gambler_loss = self.reverse_permute_all_cls_to_N_HWA_K_and_concat_(valid_loss, self.cfg.MODEL.GAMBLER_HEAD.IN_LAYERS, N, H, W, num_classes)
+            gambler_loss = reverse_list_N_A_K_H_W_to_NsumHWA_K_(valid_loss, self.cfg.MODEL.GAMBLER_HEAD.IN_LAYERS, N, H, W, num_classes)
             NAKHW_loss = [l.clone().detach() for l in gambler_loss]
-            gambler_loss = self.permute_all_cls_to_NHWAxFPN_K_and_concat(gambler_loss, num_classes=num_classes)
+            gambler_loss = list_N_AK_H_W_to_NsumHWA_K(gambler_loss, num_classes=num_classes)
         elif self.cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "L_BCAHW":
             # gambler loss: ‌N,AK,H,W
-            gambler_loss = self.reverse_permute_all_cls_to_N_HWA_K_and_concat_(valid_loss, self.cfg.MODEL.GAMBLER_HEAD.IN_LAYERS, N, [80,40,20,10,5], [80,40,20,10,5], num_classes)
-            NAKHW_loss = [l.clone().detach() for l in gambler_loss]
-            gambler_loss = self.permute_all_cls_to_NHWAxFPN_K_and_concat(gambler_loss, num_classes=num_classes)
+            gambler_loss = reverse_list_N_A_K_H_W_to_NsumHWA_K_(valid_loss, self.cfg.MODEL.GAMBLER_HEAD.IN_LAYERS, N, [80, 40, 20, 10, 5], [80, 40, 20, 10, 5], num_classes)
+            NAKHW_loss = [l.clone().detach().data for l in gambler_loss]
+            gambler_loss = list_N_AK_H_W_to_NsumHWA_K(gambler_loss, num_classes=num_classes)
             weights = self.permute_all_weights_to_N_HWA_K_and_concat_(weights, num_classes=num_classes, normalize_w=normalize_w)
 
-        # storage = get_event_storage()
+        storage = get_event_storage()
+
+        def get_loss_upper_bound(nakhw):
+            max_loss = torch.empty(self.cfg.SOLVER.IMS_PER_BATCH, 5)
+            assert len(nakhw) == 5, "only works with 5 fpn layers"
+
+            for i, layer in enumerate(nakhw):  # torch.Size([8, 3, 80, 5, 5])
+                a, _ = layer.max(dim=1, keepdim=False)  # torch.Size([8, 80, 5, 5])
+                a, _ = a.max(dim=1, keepdim=False)  # torch.Size([8, 5, 5])
+                a, _ = a.max(dim=1, keepdim=False)  # torch.Size([8, 5])
+                a, _ = a.max(dim=1, keepdim=False)  # torch.Size([8])
+                max_loss[:, i] = a.data
+            max_loss, _ = max_loss.max(dim=1, keepdim=False)  # torch.Size([8, 5]) -> torch.Size([8])
+            # print(max_loss, torch.sum(max_loss))
+            return torch.sum(max_loss)
+
+        storage.put_scalar("loss_gambler/lower_bound", -get_loss_upper_bound(NAKHW_loss))
         # with open(os.path.join(self.cfg.OUTPUT_DIR, "weights‌.csv"), "a") as my_csv:
         #     max_loss = []
         #     max_weights = []
@@ -398,7 +410,7 @@ class LayeredUnetGambler(GamblerHeads):
 
         loss_before_weighting = [loss.sum() for loss in NAKHW_loss]
 
-        return NAKHW_loss, sum(loss_before_weighting)/max(1, num_foreground), gambler_loss, weights.data
+        return NAKHW_loss, sum(loss_before_weighting)/max(1, num_foreground), gambler_loss, weights.clone().detach()
 
 
 @GAMBLER_HEAD_REGISTRY.register()

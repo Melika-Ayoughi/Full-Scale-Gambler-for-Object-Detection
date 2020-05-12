@@ -41,7 +41,7 @@ import matplotlib.pyplot as plt
 def normalize_to_01(input):
     _max = torch.max(input)
     _min = torch.min(input)
-    return (input-_min)/(_max-_min)
+    return (input - _min) / (_max - _min)
 
 
 def find_max_location(tensor_in):
@@ -69,7 +69,8 @@ def prepare_gt_grid(gt_classes, batch, num_scales, H, W, device):
     a[gt_classes == 80] = 0  # black background
     gt_classes = a.to(device)
     gt = gt_classes.reshape(batch, H, W, -1, 1)  # (n, h, w, anchors, c)
-    gt = torch.chunk(gt, num_scales, dim=3)  # todo hard coded scales #todo [0] is wrong /GAMBLER_OUT_CHANNELS is also wrong
+    gt = torch.chunk(gt, num_scales,
+                     dim=3)  # todo hard coded scales #todo [0] is wrong /GAMBLER_OUT_CHANNELS is also wrong
     gt_list = []
     for _gt in gt:
         _gt = _gt.squeeze(dim=3)
@@ -93,8 +94,9 @@ def prepare_input_images(input_images, num_scales, device):
 def prepare_betting_map(betting_map, batch, num_scales, H, W, input_grid=None, heatmap_mode=True):
     # betting_map = normalize_to_01(betting_map)
     # betting_map = betting_map * 27500
-    betting_map = betting_map[:, 0].reshape(batch, H, W, -1, 1)  # (n,w,h,a,c) #todo if weights are only per anchor and not per class
-    bm = torch.chunk(betting_map, num_scales, dim=3) #todo hardcoded scales
+    betting_map = betting_map[:, 0].reshape(batch, H, W, -1,
+                                            1)  # (n,w,h,a,c) #todo if weights are only per anchor and not per class
+    bm = torch.chunk(betting_map, num_scales, dim=3)  # todo hardcoded scales
     bm_list = []
     for scale, _bm in enumerate(bm):
         # Create heatmap image in red channel
@@ -109,7 +111,7 @@ def prepare_betting_map(betting_map, batch, num_scales, H, W, input_grid=None, h
     betting_map_grid = torch.cat(bm_list, dim=1)
 
     if input_grid is not None and heatmap_mode is True:
-    # blend the heatmap with input
+        # blend the heatmap with input
         cm = plt.get_cmap('jet')
         betting_map_grid_heatmap = cm(betting_map_grid[0, :, :].detach().cpu())
         blended = betting_map_grid_heatmap.transpose(2, 0, 1)[:3, :, :] * 0.5 + input_grid.cpu().numpy() * 0.5
@@ -128,7 +130,7 @@ def visualize_training(gt_classes, loss, betting_map, input_images, storage):
     anchor_scales = global_cfg.MODEL.ANCHOR_GENERATOR.SIZES
     if len(loss) > 1:
         raise Exception("The code still does not support the full FPN layers!")
-    loss = loss[0] #todo: change for multiple fpn layers
+    loss = loss[0]  # todo: change for multiple fpn layers
     [n, _, h, w] = loss.shape
 
     # Prepare loss *****************************************************************************************************
@@ -141,11 +143,13 @@ def visualize_training(gt_classes, loss, betting_map, input_images, storage):
     input_grid = prepare_input_images(input_images, 1, device)
 
     # Prepare betting map **********************************************************************************************
-    bets_and_input = prepare_betting_map(normalize_to_01(betting_map), n, len(anchor_scales[0]), h, w, input_grid=input_grid, heatmap_mode=False)
+    bets_and_input = prepare_betting_map(normalize_to_01(betting_map), n, len(anchor_scales[0]), h, w,
+                                         input_grid=input_grid, heatmap_mode=False)
 
     all_vis = []
     all_vis.extend([bets_and_input, (normalize_to_01(loss_grid)).cpu().numpy(), input_grid.cpu().numpy()])
-    vis = np.concatenate((bets_and_input, (normalize_to_01(loss_grid)).cpu().numpy(), input_grid.cpu().numpy()), axis=2) #todo: visualize gt as well
+    vis = np.concatenate((bets_and_input, (normalize_to_01(loss_grid)).cpu().numpy(), input_grid.cpu().numpy()),
+                         axis=2)  # todo: visualize gt as well
     storage.put_image("all", vis)
     for i, vis in enumerate(all_vis):
         all_vis[i] = vis.transpose(1, 2, 0)  # numpy images are (W,H,C)
@@ -167,11 +171,6 @@ def visualize_training_(gt_classes, loss, betting_map, input_images, storage):
     '''
 
     assert global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "L_BCAHW"
-    os.makedirs(os.path.join(global_cfg.OUTPUT_DIR,
-                             "images",
-                             "epoch_" + storage.iter,
-                             "input"), exist_ok=True)
-
     device = torch.device(global_cfg.MODEL.DEVICE)
     anchor_scales = global_cfg.MODEL.ANCHOR_GENERATOR.SIZES
 
@@ -180,30 +179,70 @@ def visualize_training_(gt_classes, loss, betting_map, input_images, storage):
         # vis.save(filepath)
         plt.imsave(filepath, vis)
 
-    if len(loss) > 1:
-        raise Exception("The code still does not support the full FPN layers!")
-    loss = loss[0] #todo: change for multiple fpn layers
-    [n, _, h, w] = loss.shape
+    # Prepare input images *********************************************************************************************
+    input_folder = os.path.join(global_cfg.OUTPUT_DIR,
+                                "images",
+                                "epoch_" + str(storage.iter),
+                                "input")
+    os.makedirs(input_folder, exist_ok=True)
+    input_grid = prepare_input_images(input_images, 1, device).cpu().numpy().transpose(1, 2, 0)
+    output(input_grid, os.path.join(input_folder, 'image.png'))
 
     # Prepare loss *****************************************************************************************************
-    loss_grid = prepare_loss_grid(loss, len(anchor_scales[0]))
+
+    for loss_layer, i in zip(loss, global_cfg.MODEL.GAMBLER_HEAD.IN_LAYERS):
+        loss_folder = os.path.join(global_cfg.OUTPUT_DIR,
+                                   "images",
+                                   "epoch_" + str(storage.iter),
+                                   "layer_" + str(i),
+                                   "loss")
+        os.makedirs(loss_folder, exist_ok=True)
+        loss_layer = torch.sum(loss_layer, dim=2)  # aggregate per class loss
+        # if multiple scales
+        # if multiple aspect ratios
+        # make both individual and concatenated images
+        for i in range(3): #todo 3
+            img_loss = make_grid(loss_layer[:, None, i, :, :], nrow=2, pad_value=1)
+            img_loss = (normalize_to_01(img_loss)).cpu().numpy().transpose(1, 2, 0)
+            output(img_loss, os.path.join(loss_folder, "scale_" + str(i) + '.png'))
 
     # Prepare ground truth *********************************************************************************************
-    gt_grid = prepare_gt_grid(gt_classes, n, len(anchor_scales[0]), h, w, device)
 
-    # Prepare input images *********************************************************************************************
-    input_grid = prepare_input_images(input_images, 1, device)
+    from imbalancedetection.gambler_heads import reverse_list_N_A_K_H_W_to_NsumHWA_K_
+    gt = reverse_list_N_A_K_H_W_to_NsumHWA_K_(gt_classes, [80, 40, 20, 10, 5], 8, [80, 40, 20, 10, 5],
+                                              [80, 40, 20, 10, 5], num_classes=1)
 
-    # Prepare betting map **********************************************************************************************
-    bets_and_input = prepare_betting_map(normalize_to_01(betting_map), n, len(anchor_scales[0]), h, w, input_grid=input_grid, heatmap_mode=False)
+    for gt_layer, i in zip(gt, global_cfg.MODEL.GAMBLER_HEAD.IN_LAYERS):
+        gt_folder = os.path.join(global_cfg.OUTPUT_DIR,
+                                 "images",
+                                 "epoch_" + str(storage.iter),
+                                 "layer_" + str(i),
+                                 "gt")
+        os.makedirs(gt_folder, exist_ok=True)
+        a = torch.ones(gt_layer.shape) * 0.5  # gray foreground by default
+        a[gt_layer == -1] = 1  # white unmatched
+        a[gt_layer == 80] = 0  # black background
+        gt_layer = a.to(device)
+        print(gt_layer.shape)
 
-    all_vis = []
-    all_vis.extend([bets_and_input, (normalize_to_01(loss_grid)).cpu().numpy(), input_grid.cpu().numpy()])
-    vis = np.concatenate((bets_and_input, (normalize_to_01(loss_grid)).cpu().numpy(), input_grid.cpu().numpy()), axis=2) #todo: visualize gt as well
-    storage.put_image("all", vis)
-    for i, vis in enumerate(all_vis):
-        all_vis[i] = vis.transpose(1, 2, 0)  # numpy images are (W,H,C)
-    return all_vis
+        for i in range(3): #todo
+            img_gt = make_grid(gt_layer[:, i, :, :], nrow=2, pad_value=1).cpu().numpy().transpose(1, 2, 0)
+            # print(img_gt.shape)
+            output(img_gt, os.path.join(gt_folder, "scale_" + str(i) + '.png'))
+
+
+    # # Prepare betting map **********************************************************************************************
+    # bets_and_input = prepare_betting_map(normalize_to_01(betting_map), n, len(anchor_scales[0]), h, w,
+    #                                      input_grid=input_grid, heatmap_mode=False)
+    #
+    # all_vis = []
+    # all_vis.extend([bets_and_input, (normalize_to_01(loss_grid)).cpu().numpy(), input_grid.cpu().numpy()])
+    # vis = np.concatenate((bets_and_input, (normalize_to_01(loss_grid)).cpu().numpy(), input_grid.cpu().numpy()),
+    #                      axis=2)  # todo: visualize gt as well
+    # storage.put_image("all", vis)
+    # for i, vis in enumerate(all_vis):
+    #     all_vis[i] = vis.transpose(1, 2, 0)  # numpy images are (W,H,C)
+    # return all_vis
 
 
 class GANTrainer(TrainerBase):
@@ -220,9 +259,11 @@ class GANTrainer(TrainerBase):
         self.detection_model = build_detector(cfg).train()
 
         # self.detection_checkpointer.resume_or_load(self.cfg.MODEL.WEIGHTS, resume=resume)
-        DetectionCheckpointer(self.detection_model, save_dir=cfg.OUTPUT_DIR).resume_or_load(cfg.MODEL.WEIGHTS, resume=True)
+        DetectionCheckpointer(self.detection_model, save_dir=cfg.OUTPUT_DIR).resume_or_load(cfg.MODEL.WEIGHTS,
+                                                                                            resume=True)
         if cfg.MODEL.GAMBLER_HEAD.LOAD_PRETRAINED_GAMBLER is True:
-            DetectionCheckpointer(self.gambler_model, save_dir=cfg.OUTPUT_DIR).resume_or_load(cfg.MODEL.GAMBLER_HEAD.WEIGHTS, resume=True)
+            DetectionCheckpointer(self.gambler_model, save_dir=cfg.OUTPUT_DIR).resume_or_load(
+                cfg.MODEL.GAMBLER_HEAD.WEIGHTS, resume=True)
 
         self.gambler_optimizer = self.build_optimizer_gambler(cfg, self.gambler_model)
         self.detection_optimizer = self.build_optimizer_detector(cfg, self.detection_model)
@@ -235,7 +276,8 @@ class GANTrainer(TrainerBase):
                 self.gambler_model, device_ids=[comm.get_local_rank()], broadcast_buffers=False
             )
             self.detection_model = DistributedDataParallel(
-                self.detection_model, device_ids=[comm.get_local_rank()], broadcast_buffers=False, find_unused_parameters=True,
+                self.detection_model, device_ids=[comm.get_local_rank()], broadcast_buffers=False,
+                find_unused_parameters=True,
             )
 
         self.data_loader = data_loader
@@ -512,7 +554,8 @@ class GANTrainer(TrainerBase):
 
         results = OrderedDict()
         for idx, dataset_name in enumerate(cfg.DATASETS.TEST):
-            test_data_loader = cls.build_test_loader(cfg, dataset_name) #todo changed to train loader cause it's not really testing!
+            test_data_loader = cls.build_test_loader(cfg,
+                                                     dataset_name)  # todo changed to train loader cause it's not really testing!
             train_data_loader = cls.build_train_loader(cfg)
 
             # When evaluators are passed in as arguments,
@@ -767,10 +810,10 @@ class GANTrainer(TrainerBase):
         # The checkpoint stores the training iteration that just finished, thus we start
         # at the next iteration (or iter zero if there's no checkpoint).
         self.start_iter = (
-            self.detection_checkpointer.resume_or_load(self.cfg.MODEL.WEIGHTS, resume=resume).get(
-                "iteration", -1
-            )
-            + 1
+                self.detection_checkpointer.resume_or_load(self.cfg.MODEL.WEIGHTS, resume=resume).get(
+                    "iteration", -1
+                )
+                + 1
         )
 
     def softmax_ce_gambler_loss(self, predictions, betting_map, gt_classes):
@@ -796,7 +839,8 @@ class GANTrainer(TrainerBase):
         loss_gambler = loss_gambler * self.gambler_loss_lambda
         loss_dict.update({"loss_gambler": loss_gambler})
         loss_dict.update({"loss_before_weighting": loss_before_weighting})
-        loss_detector = loss_dict["loss_box_reg"] + loss_dict["loss_cls"] - self.gambler_outside_lambda * loss_dict["loss_gambler"]
+        loss_detector = loss_dict["loss_box_reg"] + loss_dict["loss_cls"] - self.gambler_outside_lambda * loss_dict[
+            "loss_gambler"]
         loss_dict.update({"loss_detector": loss_detector})
 
         self._detect_anomaly(loss_detector, loss_dict)
@@ -870,12 +914,15 @@ class GANTrainer(TrainerBase):
         if self.iter_G < self.max_iter_gambler:
             logger.info(f"Iteration {self.iter} in Gambler")
             betting_map = self.gambler_model(gambler_input, gambler_image)  # (N,AK,H,W)
-            loss_nakhw, loss_before_weighting, loss_gambler, weights = self.gambler_model.sigmoid_gambler_loss(generated_output['pred_class_logits'], betting_map, gt_classes, normalize_w=self.cfg.MODEL.GAMBLER_HEAD.NORMALIZE, detach_pred=True)
+            loss_nakhw, loss_before_weighting, loss_gambler, weights = self.gambler_model.sigmoid_gambler_loss(
+                generated_output['pred_class_logits'], betting_map, gt_classes,
+                normalize_w=self.cfg.MODEL.GAMBLER_HEAD.NORMALIZE, detach_pred=True)
 
-            # if self.vis_period > 0 and self.storage.iter % self.vis_period == 0:
-            #     visualize_training_(gt_classes, loss_nakhw, weights, input_images, self.storage)
+            if self.vis_period > 0 and self.storage.iter % self.vis_period == 0:
+                visualize_training_(gt_classes.clone().detach(), loss_nakhw, weights, input_images, self.storage)
 
-            metrics_dict = self.calc_log_metrics(betting_map, weights, loss_dict, loss_gambler, loss_before_weighting, data_time)
+            metrics_dict = self.calc_log_metrics(betting_map, weights, loss_dict, loss_gambler, loss_before_weighting,
+                                                 data_time)
 
             self.gambler_optimizer.zero_grad()
             metrics_dict["loss_gambler"].backward()
@@ -887,12 +934,15 @@ class GANTrainer(TrainerBase):
         elif self.iter_D < self.max_iter_detector:
             logger.info(f"Iteration {self.iter} in Detector")
             betting_map = self.gambler_model(gambler_input)  # (N,AK,H,W)
-            loss_nakhw, loss_before_weighting, loss_gambler, weights = self.gambler_model.sigmoid_gambler_loss(generated_output['pred_class_logits'], betting_map, gt_classes, normalize_w=self.cfg.MODEL.GAMBLER_HEAD.NORMALIZE, detach_pred=False)
+            loss_nakhw, loss_before_weighting, loss_gambler, weights = self.gambler_model.sigmoid_gambler_loss(
+                generated_output['pred_class_logits'], betting_map, gt_classes,
+                normalize_w=self.cfg.MODEL.GAMBLER_HEAD.NORMALIZE, detach_pred=False)
 
             if self.vis_period > 0 and self.storage.iter % self.vis_period == 0:
-                visualize_training(gt_classes, loss_nakhw, weights, input_images, self.storage)
+                visualize_training(gt_classes.clone().detach(), loss_nakhw, weights, input_images, self.storage)
 
-            metrics_dict = self.calc_log_metrics(betting_map, weights, loss_dict, loss_gambler, loss_before_weighting, data_time)
+            metrics_dict = self.calc_log_metrics(betting_map, weights, loss_dict, loss_gambler, loss_before_weighting,
+                                                 data_time)
 
             self.detection_optimizer.zero_grad()
             metrics_dict["loss_detector"].backward()
@@ -928,7 +978,7 @@ def main(args):
     cfg = setup(args)
 
     if args.eval_only:
-        detector = build_detector(cfg) #.train .test
+        detector = build_detector(cfg)  # .train .test
         DetectionCheckpointer(detector, save_dir=cfg.OUTPUT_DIR).resume_or_load(
             cfg.MODEL.WEIGHTS, resume=args.resume
         )
