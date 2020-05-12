@@ -601,9 +601,9 @@ class GANTrainer(TrainerBase):
 
         ret.append(hooks.EvalHook(cfg.TEST.EVAL_PERIOD, test_and_save_results))
 
-        if comm.is_main_process():
-            # run writers in the end, so that evaluation metrics are written
-            ret.append(hooks.PeriodicWriter(self.build_writers()))
+        # if comm.is_main_process():
+        #     # run writers in the end, so that evaluation metrics are written
+        #     ret.append(hooks.PeriodicWriter(self.build_writers()))
         return ret
 
     def build_hooks_gambler(self, model, optimizer, scheduler, checkpointer):
@@ -659,9 +659,9 @@ class GANTrainer(TrainerBase):
 
         # ret.append(hooks.EvalHook(cfg.TEST.EVAL_PERIOD, test_and_save_results))
 
-        # if comm.is_main_process():
-        #     # run writers in the end, so that evaluation metrics are written
-        #     ret.append(hooks.PeriodicWriter(self.build_writers()))
+        if comm.is_main_process():
+            # run writers in the end, so that evaluation metrics are written
+            ret.append(hooks.PeriodicWriter(self.build_writers()))
         return ret
 
     def build_writers(self):
@@ -872,8 +872,8 @@ class GANTrainer(TrainerBase):
             betting_map = self.gambler_model(gambler_input, gambler_image)  # (N,AK,H,W)
             loss_nakhw, loss_before_weighting, loss_gambler, weights = self.gambler_model.sigmoid_gambler_loss(generated_output['pred_class_logits'], betting_map, gt_classes, normalize_w=self.cfg.MODEL.GAMBLER_HEAD.NORMALIZE, detach_pred=True)
 
-            if self.vis_period > 0 and self.storage.iter % self.vis_period == 0:
-                visualize_training_(gt_classes, loss_nakhw, weights, input_images, self.storage)
+            # if self.vis_period > 0 and self.storage.iter % self.vis_period == 0:
+            #     visualize_training_(gt_classes, loss_nakhw, weights, input_images, self.storage)
 
             metrics_dict = self.calc_log_metrics(betting_map, weights, loss_dict, loss_gambler, loss_before_weighting, data_time)
 
