@@ -189,8 +189,9 @@ def visualize_training_(gt_classes, loss, weights, input_images, storage):
     anchor_scales = global_cfg.MODEL.ANCHOR_GENERATOR.SIZES
 
     def output(vis, filepath):
-        print("Saving to {} ...".format(filepath))
-        plt.imsave(filepath, vis)
+        if global_cfg.MODEL.GAMBLER_HEAD.SAVE_VIS_FILES:
+            print("Saving to {} ...".format(filepath))
+            plt.imsave(filepath, vis)
 
     # Prepare input images *********************************************************************************************
     input_folder = os.path.join(global_cfg.OUTPUT_DIR,
@@ -215,7 +216,6 @@ def visualize_training_(gt_classes, loss, weights, input_images, storage):
         loss_layer = normalize_to_01(loss_layer)
         # if multiple scales
         # if multiple aspect ratios
-        # make both individual and concatenated images
         for j in range(3):  # todo 3
             img_loss = make_grid(loss_layer[:, None, j, :, :], nrow=2, pad_value=1)
             if j == 0:

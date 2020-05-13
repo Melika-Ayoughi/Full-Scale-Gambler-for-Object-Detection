@@ -56,6 +56,8 @@ def add_gambler_config(cfg):
     _C.MODEL.GAMBLER_HEAD.NUM_CLASSES = 80
     # Feature layer sizes going into gambler
     _C.MODEL.GAMBLER_HEAD.IN_LAYERS = [80, 40, 20, 10, 5]
+    # if True all images are saved in "images" folder, otherwise only in tensorboard
+    _C.MODEL.GAMBLER_HEAD.SAVE_VIS_FILES = False
     # The period (in terms of steps) for minibatch visualization at train time.
     # Set to 0 to disable.
     _C.MODEL.GAMBLER_HEAD.VIS_PERIOD = 300
