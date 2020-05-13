@@ -43,6 +43,20 @@ def normalize_to_01(input):
     _min = torch.min(input)
     return (input - _min) / (_max - _min)
 
+#
+# def normalize_list_to_01(input_list):
+#     _max = -float('inf')
+#     _min = float('inf')
+#     for input_ in input_list:
+#         if torch.min(input_) < _min:
+#             _min = torch.min(input_)
+#         if torch.max(input_) > _max:
+#             _max = torch.max(input)
+#     print(f"max: {_max},  min: {_min}")
+#     for i, input_ in enumerate(input_list):
+#         input_list[i] = (input_ - _min) / (_max - _min)
+#     return input_list
+
 
 def find_max_location(tensor_in):
     return (tensor_in == torch.ones_like(tensor_in) * tensor_in.max()).nonzero()
@@ -156,13 +170,13 @@ def visualize_training(gt_classes, loss, betting_map, input_images, storage):
     return all_vis
 
 
-def visualize_training_(gt_classes, loss, betting_map, input_images, storage):
+def visualize_training_(gt_classes, loss, weights, input_images, storage):
     '''
 
     Args:
         gt_classes: tensor[N, Ax(H1xW1+...+H5xW5)]
         loss: list[tensor[N, A, K, H, W]]
-        betting_map: tensor[NxAx(H1xW1+...+H5xW5), K]
+        weights: tensor[NxAx(H1xW1+...+H5xW5), K]
         input_images: tensor[N, 3, 640, 640]
         storage:
 
@@ -176,7 +190,6 @@ def visualize_training_(gt_classes, loss, betting_map, input_images, storage):
 
     def output(vis, filepath):
         print("Saving to {} ...".format(filepath))
-        # vis.save(filepath)
         plt.imsave(filepath, vis)
 
     # Prepare input images *********************************************************************************************
@@ -190,6 +203,7 @@ def visualize_training_(gt_classes, loss, betting_map, input_images, storage):
 
     # Prepare loss *****************************************************************************************************
 
+    all_loss = []
     for loss_layer, i in zip(loss, global_cfg.MODEL.GAMBLER_HEAD.IN_LAYERS):
         loss_folder = os.path.join(global_cfg.OUTPUT_DIR,
                                    "images",
@@ -198,13 +212,18 @@ def visualize_training_(gt_classes, loss, betting_map, input_images, storage):
                                    "loss")
         os.makedirs(loss_folder, exist_ok=True)
         loss_layer = torch.sum(loss_layer, dim=2)  # aggregate per class loss
+        loss_layer = normalize_to_01(loss_layer)
         # if multiple scales
         # if multiple aspect ratios
         # make both individual and concatenated images
-        for i in range(3): #todo 3
-            img_loss = make_grid(loss_layer[:, None, i, :, :], nrow=2, pad_value=1)
-            img_loss = (normalize_to_01(img_loss)).cpu().numpy().transpose(1, 2, 0)
-            output(img_loss, os.path.join(loss_folder, "scale_" + str(i) + '.png'))
+        for j in range(3):  # todo 3
+            img_loss = make_grid(loss_layer[:, None, j, :, :], nrow=2, pad_value=1)
+            if j == 0:
+                all_loss.append(img_loss)
+            else:
+                all_loss[-1] = torch.cat((all_loss[-1], img_loss), dim=2)
+            img_loss = img_loss.cpu().numpy().transpose(1, 2, 0)
+            output(img_loss, os.path.join(loss_folder, "scale_" + str(j) + '.png'))
 
     # Prepare ground truth *********************************************************************************************
 
@@ -212,6 +231,7 @@ def visualize_training_(gt_classes, loss, betting_map, input_images, storage):
     gt = reverse_list_N_A_K_H_W_to_NsumHWA_K_(gt_classes, [80, 40, 20, 10, 5], 8, [80, 40, 20, 10, 5],
                                               [80, 40, 20, 10, 5], num_classes=1)
 
+    all_gt = []
     for gt_layer, i in zip(gt, global_cfg.MODEL.GAMBLER_HEAD.IN_LAYERS):
         gt_folder = os.path.join(global_cfg.OUTPUT_DIR,
                                  "images",
@@ -223,26 +243,45 @@ def visualize_training_(gt_classes, loss, betting_map, input_images, storage):
         a[gt_layer == -1] = 1  # white unmatched
         a[gt_layer == 80] = 0  # black background
         gt_layer = a.to(device)
-        print(gt_layer.shape)
 
-        for i in range(3): #todo
-            img_gt = make_grid(gt_layer[:, i, :, :], nrow=2, pad_value=1).cpu().numpy().transpose(1, 2, 0)
-            # print(img_gt.shape)
-            output(img_gt, os.path.join(gt_folder, "scale_" + str(i) + '.png'))
+        for j in range(3):  # todo
+            img_gt = make_grid(gt_layer[:, j, :, :], nrow=2, pad_value=1)
+            if j == 0:
+                all_gt.append(img_gt)
+            else:
+                all_gt[-1] = torch.cat((all_gt[-1], img_gt), dim=2)
+            img_gt = img_gt.cpu().numpy().transpose(1, 2, 0)
+            output(img_gt, os.path.join(gt_folder, "scale_" + str(j) + '.png'))
 
+    # Prepare betting map **********************************************************************************************
 
-    # # Prepare betting map **********************************************************************************************
+    weights = reverse_list_N_A_K_H_W_to_NsumHWA_K_(weights, [80, 40, 20, 10, 5], 8, [80, 40, 20, 10, 5],
+                                                   [80, 40, 20, 10, 5], num_classes=global_cfg.MODEL.GAMBLER_HEAD.NUM_CLASSES)
+    all_weights = []
+    for weight_layer, i in zip(weights, global_cfg.MODEL.GAMBLER_HEAD.IN_LAYERS):
+        weights_folder = os.path.join(global_cfg.OUTPUT_DIR,
+                                      "images",
+                                      "epoch_" + str(storage.iter),
+                                      "layer_" + str(i),
+                                      "weights")
+        os.makedirs(weights_folder, exist_ok=True)
+        weight_layer = torch.sum(weight_layer, dim=2)  # aggregate per class weight
+        weight_layer = normalize_to_01(weight_layer)
+        for j in range(3):  # todo
+            img_weight = make_grid(weight_layer[:, None, j, :, :], nrow=2, pad_value=1)
+            if j == 0:
+                all_weights.append(img_weight)
+            else:
+                all_weights[-1] = torch.cat((all_weights[-1], img_weight), dim=2)
+
+            img_weight = img_weight.cpu().numpy().transpose(1, 2, 0)
+            output(img_weight, os.path.join(weights_folder, "scale_" + str(i) + '.png'))
+
+    # tensorboard  **********************************************************************************************
+    for l_gt, l_loss, l_w in zip(all_gt, all_loss, all_weights):
+        storage.put_image("all", torch.cat((l_gt, l_loss, l_w), dim=1))
     # bets_and_input = prepare_betting_map(normalize_to_01(betting_map), n, len(anchor_scales[0]), h, w,
     #                                      input_grid=input_grid, heatmap_mode=False)
-    #
-    # all_vis = []
-    # all_vis.extend([bets_and_input, (normalize_to_01(loss_grid)).cpu().numpy(), input_grid.cpu().numpy()])
-    # vis = np.concatenate((bets_and_input, (normalize_to_01(loss_grid)).cpu().numpy(), input_grid.cpu().numpy()),
-    #                      axis=2)  # todo: visualize gt as well
-    # storage.put_image("all", vis)
-    # for i, vis in enumerate(all_vis):
-    #     all_vis[i] = vis.transpose(1, 2, 0)  # numpy images are (W,H,C)
-    # return all_vis
 
 
 class GANTrainer(TrainerBase):

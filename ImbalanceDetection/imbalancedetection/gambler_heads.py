@@ -78,7 +78,7 @@ def reverse_list_N_A_K_H_W_to_NsumHWA_K_(tensor, in_layers, N, H, W, num_classes
         tensor_prime = [reverse_N_A_K_H_W_to_N_HWA_K(t, N, H, W, num_classes) for t in tensor]
     else:  # multiple fpn layers
         assert isinstance(H, list)
-        tensor = torch.split(tensor, [h * w * 3 for h, w in zip(H, W)], dim=1)
+        tensor = torch.split(tensor, [h * w * 3 for h, w in zip(H, W)], dim=1) #todo: 3
         tensor_prime = [reverse_N_A_K_H_W_to_N_HWA_K(t, N, h, w, num_classes) for t, h, w in zip(tensor, H, W)]
     return tensor_prime
 
