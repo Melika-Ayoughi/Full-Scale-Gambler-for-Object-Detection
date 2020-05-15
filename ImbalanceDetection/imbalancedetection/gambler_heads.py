@@ -70,7 +70,7 @@ def reverse_list_N_AK_H_W_to_NsumHWA_K(tensor, num_fpn_layers, N, H, W, num_clas
     return tensor_prime
 
 
-def reverse_list_N_A_K_H_W_to_NsumHWA_K_(tensor, in_layers, N, H, W, num_classes=80):
+def reverse_list_N_A_K_H_W_to_NsumHWA_K_(tensor, in_layers, N, H, W, num_scale=3, num_classes=80):
     tensor = tensor.reshape(N, -1, num_classes)  # (n,h*w*a,k)
     if len(in_layers) == 1:  # 1 fpn layer
         assert isinstance(H, int)
@@ -78,7 +78,7 @@ def reverse_list_N_A_K_H_W_to_NsumHWA_K_(tensor, in_layers, N, H, W, num_classes
         tensor_prime = [reverse_N_A_K_H_W_to_N_HWA_K(t, N, H, W, num_classes) for t in tensor]
     else:  # multiple fpn layers
         assert isinstance(H, list)
-        tensor = torch.split(tensor, [h * w * 3 for h, w in zip(H, W)], dim=1) #todo: 3
+        tensor = torch.split(tensor, [h * w * num_scale for h, w in zip(H, W)], dim=1)
         tensor_prime = [reverse_N_A_K_H_W_to_N_HWA_K(t, N, h, w, num_classes) for t, h, w in zip(tensor, H, W)]
     return tensor_prime
 
@@ -106,7 +106,7 @@ class GamblerHeads(torch.nn.Module):
         weights_flattened = [N_AK_H_W_to_N_HWA_K(w, num_classes) for w in weights]  # Size=(N,HWA,K)
         weights_flattened = [w + self.cfg.MODEL.GAMBLER_HEAD.GAMBLER_TEMPERATURE for w in weights_flattened]
         if normalize_w is True:
-            weights_flattened = [w / torch.sum(w, dim=[1, 2], keepdim=True) for w in weights_flattened]  # normalize by wxh only for now #todo experiment with normalizing across anchors -> distribute bets among scales maybe some are more important
+            weights_flattened = [w / torch.sum(w, dim=[1, 2], keepdim=True) for w in weights_flattened]
         # concatenate on the first dimension (representing the feature levels), to
         # take into account the way the labels were generated (with all feature maps
         # being concatenated as well)
@@ -172,7 +172,7 @@ class UnetGambler(GamblerHeads):
         pred_class_logits = list_N_AK_H_W_to_NsumHWA_K(
             pred_class_logits, num_classes
         )  # Shapes: (N x R, K) and (N x R, 4), respectively.
-        gt_classes = gt_classes.flatten() #todo next: change the shape of gt to the proper shape
+        gt_classes = gt_classes.flatten()
         valid_idxs = gt_classes >= 0
         foreground_idxs = (gt_classes >= 0) & (gt_classes != num_classes)
         num_foreground = foreground_idxs.sum()
@@ -200,10 +200,10 @@ class UnetGambler(GamblerHeads):
             gambler_loss = None
 
         # ignore the invalid ids in loss
-        valid_loss = torch.zeros_like(gambler_loss)  # todo: backprop
+        valid_loss = torch.zeros_like(gambler_loss)  # todo: check backprop
         valid_loss[valid_idxs, :] = gambler_loss[valid_idxs, :]
 
-        gambler_loss = reverse_list_N_AK_H_W_to_NsumHWA_K(valid_loss, 1, N, H, W, num_classes)  # N,AK,H,W_loss #todo num fpn layers
+        gambler_loss = reverse_list_N_AK_H_W_to_NsumHWA_K(valid_loss, 1, N, H, W, num_classes)  # N,AK,H,W_loss
 
         if self.cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "B1HW":
             gambler_loss = [torch.sum(l, dim=[1], keepdim=True) for l in gambler_loss]  # aggregate over classes and anchors
@@ -233,7 +233,7 @@ class UnetGambler(GamblerHeads):
         storage.put_scalar("sum/max_loss", np.sum(np.array(max_loss)))  # sum over the batch
         storage.put_scalar("sum/max_weight", np.sum(np.array(max_weights)))  # sum over the batch
 
-        weights = self.permute_all_weights_to_N_HWA_K_and_concat([weights], 1, normalize_w)  # todo hardcoded 3: scales
+        weights = self.permute_all_weights_to_N_HWA_K_and_concat([weights], 1, normalize_w)
         gambler_loss = -weights * gambler_loss
 
         if reduction == "mean":
@@ -298,7 +298,7 @@ class LayeredUnetGambler(GamblerHeads):
         pred_class_logits = list_N_AK_H_W_to_NsumHWA_K(
             pred_class_logits, num_classes
         )  # Shapes: (N x R, K) and (N x R, 4), respectively.
-        gt_classes = gt_classes.flatten() #todo next: change the shape of gt to the proper shape
+        gt_classes = gt_classes.flatten()
         valid_idxs = gt_classes >= 0
         foreground_idxs = (gt_classes >= 0) & (gt_classes != num_classes)
         num_foreground = foreground_idxs.sum()
@@ -361,7 +361,13 @@ class LayeredUnetGambler(GamblerHeads):
             gambler_loss = list_N_AK_H_W_to_NsumHWA_K(gambler_loss, num_classes=num_classes)
         elif self.cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "L_BCAHW":
             # gambler loss: ‌N,AK,H,W
-            gambler_loss = reverse_list_N_A_K_H_W_to_NsumHWA_K_(valid_loss, self.cfg.MODEL.GAMBLER_HEAD.IN_LAYERS, N, [80, 40, 20, 10, 5], [80, 40, 20, 10, 5], num_classes)
+            gambler_loss = reverse_list_N_A_K_H_W_to_NsumHWA_K_(valid_loss,
+                                                                self.cfg.MODEL.GAMBLER_HEAD.IN_LAYERS,
+                                                                N,
+                                                                [80, 40, 20, 10, 5],
+                                                                [80, 40, 20, 10, 5],
+                                                                num_scale=len(self.cfg.MODEL.ANCHOR_GENERATOR.SIZES[0]),
+                                                                num_classes=num_classes)
             NAKHW_loss = [l.clone().detach().data for l in gambler_loss]
             gambler_loss = list_N_AK_H_W_to_NsumHWA_K(gambler_loss, num_classes=num_classes)
             weights = self.permute_all_weights_to_N_HWA_K_and_concat_(weights, num_classes=num_classes, normalize_w=normalize_w)
@@ -418,11 +424,11 @@ class UnetLaurence(GamblerHeads):
     def __init__(self, cfg):
         super().__init__(cfg)
         self.device = torch.device(cfg.MODEL.DEVICE)
-        num_downs = 5 #todo before: 6
-        ngf = 64 #todo??
+        num_downs = 5 #before: 6
+        ngf = 64 #??
         norm_layer = nn.BatchNorm2d
         use_dropout = False
-        kernel_size = 3 #todo before: 4
+        kernel_size = 3 #before: 4
         pool = False
         self.gambler = UnetGenerator(self.in_channels, self.out_channels, num_downs, ngf=ngf, norm_layer=norm_layer, use_dropout=use_dropout, kernel_size=kernel_size, pool=pool)
         self.to(self.device)

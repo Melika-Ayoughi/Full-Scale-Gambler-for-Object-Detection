@@ -186,7 +186,7 @@ def visualize_training_(gt_classes, loss, weights, input_images, storage):
 
     assert global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "L_BCAHW"
     device = torch.device(global_cfg.MODEL.DEVICE)
-    anchor_scales = global_cfg.MODEL.ANCHOR_GENERATOR.SIZES
+    anchor_scales = len(global_cfg.MODEL.ANCHOR_GENERATOR.SIZES[0])
 
     def output(vis, filepath):
         if global_cfg.MODEL.GAMBLER_HEAD.SAVE_VIS_FILES:
@@ -216,7 +216,7 @@ def visualize_training_(gt_classes, loss, weights, input_images, storage):
         loss_layer = normalize_to_01(loss_layer)
         # if multiple scales
         # if multiple aspect ratios
-        for j in range(3):  # todo 3
+        for j in range(anchor_scales):
             img_loss = make_grid(loss_layer[:, None, j, :, :], nrow=2, pad_value=1)
             if j == 0:
                 all_loss.append(img_loss)
@@ -228,8 +228,13 @@ def visualize_training_(gt_classes, loss, weights, input_images, storage):
     # Prepare ground truth *********************************************************************************************
 
     from imbalancedetection.gambler_heads import reverse_list_N_A_K_H_W_to_NsumHWA_K_
-    gt = reverse_list_N_A_K_H_W_to_NsumHWA_K_(gt_classes, [80, 40, 20, 10, 5], 8, [80, 40, 20, 10, 5],
-                                              [80, 40, 20, 10, 5], num_classes=1)
+    gt = reverse_list_N_A_K_H_W_to_NsumHWA_K_(gt_classes,
+                                              [80, 40, 20, 10, 5], #todo
+                                              8,
+                                              [80, 40, 20, 10, 5],
+                                              [80, 40, 20, 10, 5],
+                                              num_scale=anchor_scales,
+                                              num_classes=1)
 
     all_gt = []
     for gt_layer, i in zip(gt, global_cfg.MODEL.GAMBLER_HEAD.IN_LAYERS):
@@ -244,7 +249,7 @@ def visualize_training_(gt_classes, loss, weights, input_images, storage):
         a[gt_layer == 80] = 0  # black background
         gt_layer = a.to(device)
 
-        for j in range(3):  # todo
+        for j in range(anchor_scales):
             img_gt = make_grid(gt_layer[:, j, :, :], nrow=2, pad_value=1)
             if j == 0:
                 all_gt.append(img_gt)
@@ -255,8 +260,13 @@ def visualize_training_(gt_classes, loss, weights, input_images, storage):
 
     # Prepare betting map **********************************************************************************************
 
-    weights = reverse_list_N_A_K_H_W_to_NsumHWA_K_(weights, [80, 40, 20, 10, 5], 8, [80, 40, 20, 10, 5],
-                                                   [80, 40, 20, 10, 5], num_classes=global_cfg.MODEL.GAMBLER_HEAD.NUM_CLASSES)
+    weights = reverse_list_N_A_K_H_W_to_NsumHWA_K_(weights,
+                                                   [80, 40, 20, 10, 5],#todo
+                                                   8,
+                                                   [80, 40, 20, 10, 5],
+                                                   [80, 40, 20, 10, 5],
+                                                   num_scale=anchor_scales,
+                                                   num_classes=global_cfg.MODEL.GAMBLER_HEAD.NUM_CLASSES)
     all_weights = []
     for weight_layer, i in zip(weights, global_cfg.MODEL.GAMBLER_HEAD.IN_LAYERS):
         weights_folder = os.path.join(global_cfg.OUTPUT_DIR,
@@ -267,7 +277,7 @@ def visualize_training_(gt_classes, loss, weights, input_images, storage):
         os.makedirs(weights_folder, exist_ok=True)
         weight_layer = torch.sum(weight_layer, dim=2)  # aggregate per class weight
         weight_layer = normalize_to_01(weight_layer)
-        for j in range(3):  # todo
+        for j in range(anchor_scales):
             img_weight = make_grid(weight_layer[:, None, j, :, :], nrow=2, pad_value=1)
             if j == 0:
                 all_weights.append(img_weight)
