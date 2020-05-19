@@ -65,17 +65,6 @@ class LayeredUnet(nn.Module):
     def __init__(self, pred_channels, img_channels, bilinear=True):
         super(LayeredUnet, self).__init__()
 
-        # # todo # Initialization
-        # for modules in [self.cls_subnet, self.bbox_subnet, self.cls_score, self.bbox_pred]:
-        #     for layer in modules.modules():
-        #         if isinstance(layer, nn.Conv2d):
-        #             torch.nn.init.normal_(layer.weight, mean=0, std=0.01)
-        #             torch.nn.init.constant_(layer.bias, 0)
-        #
-        # # Use prior in model initialization to improve stability
-        # bias_value = -math.log((1 - prior_prob) / prior_prob)
-        # torch.nn.init.constant_(self.cls_score.bias, bias_value)
-
         self.inc = DoubleConv(pred_channels+img_channels, 64)
         self.down1 = DownCat(pred_channels, 64, 128)
         self.down2 = DownCat(pred_channels, 128, 256)
@@ -85,9 +74,22 @@ class LayeredUnet(nn.Module):
         self.up2 = UpCat(512, 256, bilinear)
         self.up3 = UpCat(256, 128, bilinear)
         self.up4 = UpCat(128, 64, bilinear)
-        # self.outc = OutConv(64, out_classes)
 
-        # self.sigmoid = torch.nn.Sigmoid()
+        # todo # Initialization
+        for modules in [self.inc, self.down1, self.down2, self.down3,
+                        self.down4, self.up1, self.up2, self.up3, self.up4]:
+            for layer in modules.modules():
+                if isinstance(layer, nn.Conv2d):
+                    torch.nn.init.kaiming_uniform_(layer.weight, mode='fan_in', nonlinearity='relu')
+                    # torch.nn.init.normal_(layer.weight, mean=0, std=0.01)
+                    torch.nn.init.constant_(layer.bias, 0)
+
+        # #todo Use prior in model initialization to improve stability
+        # bias_value = -math.log((1 - prior_prob) / prior_prob)
+        # torch.nn.init.constant_(self.up1.bias, bias_value)
+        # torch.nn.init.constant_(self.up2.bias, bias_value)
+        # torch.nn.init.constant_(self.up3.bias, bias_value)
+        # torch.nn.init.constant_(self.up4.bias, bias_value)
 
     def forward(self, layered_x, image):
         """
