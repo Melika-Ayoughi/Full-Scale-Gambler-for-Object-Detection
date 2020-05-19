@@ -265,6 +265,22 @@ class LayeredUnetGambler(GamblerHeads):
         logger.debug(f"Number of Channels from predictions {g_in_channels} and image {image_channels} don't match!!")
         self.layered_gambler = LayeredUnet(g_in_channels, image_channels, bilinear=self.bilinear)
         self.postgamblerpredictions = PostGamblerPredictions(in_channel=None, out_channel=self.out_channels, num_conv=1, shared=False)
+
+        # todo # Initialization
+        for modules in [self.pregamblerpredictions, self.layered_gambler, self.postgamblerpredictions]:
+            for layer in modules.modules():
+                if isinstance(layer, nn.Conv2d) or isinstance(layer, nn.ConvTranspose2d):
+                    torch.nn.init.kaiming_uniform_(layer.weight, mode='fan_in', nonlinearity='relu')
+                    # torch.nn.init.normal_(layer.weight, mean=0, std=0.01)
+                    torch.nn.init.constant_(layer.bias, 0)
+
+        # #todo Use prior in model initialization to improve stability
+        # bias_value = -math.log((1 - prior_prob) / prior_prob) # todo how is it calculated???
+        # torch.nn.init.constant_(self.up1.bias, bias_value)
+        # torch.nn.init.constant_(self.up2.bias, bias_value)
+        # torch.nn.init.constant_(self.up3.bias, bias_value)
+        # torch.nn.init.constant_(self.up4.bias, bias_value)
+
         self.to(self.device)
 
     def forward(self, input, image):
