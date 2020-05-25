@@ -77,7 +77,12 @@ class PreGamblerImage(nn.Module):
         self.image_mode = image_mode
         if self.image_mode == "conv":
             #todo need to decide on the architecture
-            self.model_image = DoubleConv(3, out_channel)
+            self.model_image = nn.Sequential(
+                DoubleConv(3, 8),
+                Down(8, 16),
+                Down(16, 32),
+                Down(32, out_channel)
+            )
 
     def forward(self, input_images):
         if self.image_mode == "downsample":

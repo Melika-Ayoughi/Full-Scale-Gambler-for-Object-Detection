@@ -65,7 +65,11 @@ class LayeredUnet(nn.Module):
     def __init__(self, pred_channels, img_channels, bilinear=True):
         super(LayeredUnet, self).__init__()
 
-        self.inc = DoubleConv(pred_channels+img_channels, 64)
+        if img_channels == 0:
+            self.inc = DoubleConv(pred_channels, 64)
+        else:
+            self.inc = DoubleConv(pred_channels+img_channels, 64)
+
         self.down1 = DownCat(pred_channels, 64, 128)
         self.down2 = DownCat(pred_channels, 128, 256)
         self.down3 = DownCat(pred_channels, 256, 512)
@@ -75,14 +79,14 @@ class LayeredUnet(nn.Module):
         self.up3 = UpCat(256, 128, bilinear)
         self.up4 = UpCat(128, 64, bilinear)
 
-        # todo # Initialization
-        for modules in [self.inc, self.down1, self.down2, self.down3,
-                        self.down4, self.up1, self.up2, self.up3, self.up4]:
-            for layer in modules.modules():
-                if isinstance(layer, nn.Conv2d):
-                    torch.nn.init.kaiming_uniform_(layer.weight, mode='fan_in', nonlinearity='relu')
-                    # torch.nn.init.normal_(layer.weight, mean=0, std=0.01)
-                    torch.nn.init.constant_(layer.bias, 0)
+        # # todo # Initialization
+        # for modules in [self.inc, self.down1, self.down2, self.down3,
+        #                 self.down4, self.up1, self.up2, self.up3, self.up4]:
+        #     for layer in modules.modules():
+        #         if isinstance(layer, nn.Conv2d):
+        #             torch.nn.init.kaiming_uniform_(layer.weight, mode='fan_in', nonlinearity='relu')
+        #             # torch.nn.init.normal_(layer.weight, mean=0, std=0.01)
+        #             torch.nn.init.constant_(layer.bias, 0)
 
         # #todo Use prior in model initialization to improve stability
         # bias_value = -math.log((1 - prior_prob) / prior_prob)
@@ -98,16 +102,21 @@ class LayeredUnet(nn.Module):
             layered_x: List(Tensor (N, C_i, H_i, W_i))
                 each Tensor is predictions from the corresponding FPN layer
                 starting from P3 (80x80) to P7 (5x5)
-            image: Tensor(N, C(variable),
+            image: None or Tensor(N, 3, H, W) or Tensor(N, variable, H, W)
 
         Returns:
             logits: Tensor (N, C_out, H_out, W_out)
 
         """
-        assert image.shape[2] == layered_x[0].shape[2] and image.shape[3] == layered_x[0].shape[3]
+
         layered_output = []
 
-        x1 = self.inc(torch.cat((layered_x[0], image), dim=1))
+        if image is None:
+            x1 = self.inc(layered_x[0])
+        else:
+            assert image.shape[2] == layered_x[0].shape[2] and image.shape[3] == layered_x[0].shape[3]
+            x1 = self.inc(torch.cat((layered_x[0], image), dim=1))
+
         # print(f"x1: {x1.shape}")
         x2 = self.down1(layered_x[1], x1)
         # print(f"x2: {x2.shape}")

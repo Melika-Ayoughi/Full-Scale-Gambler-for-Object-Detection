@@ -16,7 +16,7 @@ MODEL:
     GAMBLER_ITERATIONS: 100
     DETECTOR_ITERATIONS: 0
     GAMBLER_OUTPUT: "L_BCAHW" #"B1HW"
-    GAMBLER_LAMBDA: 1000 # GAMBLER_OUT_CHANNELS*w=28*h=40 #todo: need to change to actual h and w times scales
+    GAMBLER_KAPPA: 1000 # GAMBLER_OUT_CHANNELS*w=28*h=40 #todo: need to change to actual h and w times scales
     GAMBLER_OUTSIDE_LAMBDA: 1
     GAMBLER_TEMPERATURE: 1e-20 #1e-20 epsilon is needed for divide by 0
     GAMBLER_LOSS_MODE: "focal"
@@ -27,12 +27,13 @@ MODEL:
     BILINEAR_UPSAMPLING: False
     NUM_CLASSES: 80 #1230
     IN_LAYERS: [80, 40, 20, 10, 5]
+    INIT: "default"
 #    SAVE_VIS_FILES: TRUE
 #    GAMBLER_IN_LAYERS: 5
 #    GAMBLER_OUT_LAYERS: 5
-#    IMAGE_MODE: "conv"
-#    IMAGE_CHANNELS: 3
-#    FIXED_CHANNEL: 32
+    IMAGE_MODE: "conv"
+    IMAGE_CHANNELS: 32
+    FIXED_CHANNEL: 32
 #    DATA_RANGE: [-0.5, 0.5]
 #    LOAD_PRETRAINED_GAMBLER: True
 #    WEIGHTS: "./output/gambler/11scales_fix_detector_no_temperature_lambda27500/gambler_models/model_final.pth"
@@ -58,4 +59,4 @@ INPUT:
   RESIZING: False
 DATALOADER:
     ASPECT_RATIO_GROUPING: False
-OUTPUT_DIR: "./output/gambler/initialize_gambler_head_kappa1000"
+OUTPUT_DIR: "./output/gambler/conv_img_3"

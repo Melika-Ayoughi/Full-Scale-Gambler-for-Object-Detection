@@ -257,22 +257,22 @@ class LayeredUnetGambler(GamblerHeads):
         # out_layers = cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUT_LAYERS
 
         image_mode = cfg.MODEL.GAMBLER_HEAD.IMAGE_MODE #conv or downsample
-        image_channels = cfg.MODEL.GAMBLER_HEAD.IMAGE_CHANNELS
+        self.image_channels = cfg.MODEL.GAMBLER_HEAD.IMAGE_CHANNELS
         g_in_channels = cfg.MODEL.GAMBLER_HEAD.FIXED_CHANNEL
 
-        self.pregamblerimage = PreGamblerImage(image_mode, out_channel=image_channels)
+        self.pregamblerimage = PreGamblerImage(image_mode, out_channel=self.image_channels)
         self.pregamblerpredictions = PreGamblerPredictions(self.in_channels, out_channel=g_in_channels, num_conv=1, shared=True)
-        logger.debug(f"Number of Channels from predictions {g_in_channels} and image {image_channels} don't match!!")
-        self.layered_gambler = LayeredUnet(g_in_channels, image_channels, bilinear=self.bilinear)
+        logger.debug(f"Number of Channels from predictions {g_in_channels} and image {self.image_channels} don't match!!")
+        self.layered_gambler = LayeredUnet(g_in_channels, self.image_channels, bilinear=self.bilinear)
         self.postgamblerpredictions = PostGamblerPredictions(in_channel=None, out_channel=self.out_channels, num_conv=1, shared=False)
 
         # todo # Initialization
-        for modules in [self.pregamblerpredictions, self.layered_gambler, self.postgamblerpredictions]:
-            for layer in modules.modules():
-                if isinstance(layer, nn.Conv2d) or isinstance(layer, nn.ConvTranspose2d):
-                    torch.nn.init.kaiming_uniform_(layer.weight, mode='fan_in', nonlinearity='relu')
-                    # torch.nn.init.normal_(layer.weight, mean=0, std=0.01)
-                    torch.nn.init.constant_(layer.bias, 0)
+        # for modules in [self.pregamblerpredictions, self.layered_gambler, self.postgamblerpredictions]:
+        #     for layer in modules.modules():
+        #         if isinstance(layer, nn.Conv2d) or isinstance(layer, nn.ConvTranspose2d):
+        #             torch.nn.init.kaiming_uniform_(layer.weight, mode='fan_in', nonlinearity='relu')
+        #             # torch.nn.init.normal_(layer.weight, mean=0, std=0.01)
+        #             torch.nn.init.constant_(layer.bias, 0)
 
         # #todo Use prior in model initialization to improve stability
         # bias_value = -math.log((1 - prior_prob) / prior_prob) # todo how is it calculated???
@@ -285,7 +285,11 @@ class LayeredUnetGambler(GamblerHeads):
 
     def forward(self, input, image):
         # prepare the input:
-        im = self.pregamblerimage(image)
+        if self.image_channels == 0:
+            im = None
+        else:
+            im = self.pregamblerimage(image)
+
         pred = self.pregamblerpredictions(input)
         out1 = self.layered_gambler(pred, im)  # out1 = ['p7', 'p6', 'p5', 'p4', 'p3']
         out2 = self.postgamblerpredictions(out1)  # out2 = ['p3', 'p4', 'p5', 'p6', 'p7']

@@ -212,7 +212,9 @@ def visualize_training_(gt_classes, loss, weights, input_images, storage):
                                    "layer_" + str(i),
                                    "loss")
         os.makedirs(loss_folder, exist_ok=True)
-        loss_layer = torch.sum(loss_layer, dim=2)  # aggregate per class loss
+
+        # loss_layer = torch.sum(loss_layer, dim=2)  # aggregate per class loss
+        loss_layer, _ = loss_layer.max(dim=2, keepdim=False)  # max over all classes at every location
         loss_layer = normalize_to_01(loss_layer)
         # if multiple scales
         # if multiple aspect ratios
@@ -380,7 +382,7 @@ class GANTrainer(TrainerBase):
         )
 
         self.register_hooks(gamb_hooks)
-        self.gambler_loss_lambda = cfg.MODEL.GAMBLER_HEAD.GAMBLER_LAMBDA
+        self.gambler_loss_kappa = cfg.MODEL.GAMBLER_HEAD.GAMBLER_KAPPA
         self.regression_loss_lambda = cfg.MODEL.GAMBLER_HEAD.REGRESSION_LAMBDA
         self.gambler_outside_lambda = cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTSIDE_LAMBDA
         self.vis_period = cfg.MODEL.GAMBLER_HEAD.VIS_PERIOD
@@ -879,13 +881,13 @@ class GANTrainer(TrainerBase):
         betting_map = betting_map / (torch.sum(betting_map, dim=1)).reshape(betting_map.shape[0], 1).expand(
             betting_map.shape)
         loss_gambler = -torch.mean(loss_func(pred_class_logits, gt_classes) * betting_map.reshape(betting_map.shape[0],
-                                                                                                  -1)) * self.gambler_loss_lambda
+                                                                                                  -1)) * self.gambler_loss_kappa
         return loss_gambler
 
     def calc_log_metrics(self, betting_map, weights, loss_dict, loss_gambler, loss_before_weighting, data_time):
 
         loss_dict.update({"loss_box_reg": loss_dict["loss_box_reg"] * self.regression_loss_lambda})
-        loss_gambler = loss_gambler * self.gambler_loss_lambda
+        loss_gambler = loss_gambler * self.gambler_loss_kappa
         loss_dict.update({"loss_gambler": loss_gambler})
         loss_dict.update({"loss_before_weighting": loss_before_weighting})
         loss_detector = loss_dict["loss_box_reg"] + loss_dict["loss_cls"] - self.gambler_outside_lambda * loss_dict[

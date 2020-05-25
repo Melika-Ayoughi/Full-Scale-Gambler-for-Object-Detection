@@ -28,7 +28,7 @@ def add_gambler_config(cfg):
     # Number of output channels of the gambler module (desired betting map channels)
     _C.MODEL.GAMBLER_HEAD.GAMBLER_OUT_CHANNELS = 11
     # Hyperparameter lambda that multiplies the gambler loss
-    _C.MODEL.GAMBLER_HEAD.GAMBLER_LAMBDA = 2200
+    _C.MODEL.GAMBLER_HEAD.GAMBLER_KAPPA = 2200
     # Hyperparameter lambda that multiplies the regression loss
     _C.MODEL.GAMBLER_HEAD.REGRESSION_LAMBDA = 1
     # Hyperparameter lambda that multiplies the gambler loss from outside
@@ -58,6 +58,8 @@ def add_gambler_config(cfg):
     _C.MODEL.GAMBLER_HEAD.IN_LAYERS = [80, 40, 20, 10, 5]
     # if True all images are saved in "images" folder, otherwise only in tensorboard
     _C.MODEL.GAMBLER_HEAD.SAVE_VIS_FILES = False
+    # {{{He/Xavier}_{uniform/normal}}/random}_{unet/unet+prepost}_{bias0/biasrand}
+    _C.MODEL.GAMBLER_HEAD.INIT = "random"
     # The period (in terms of steps) for minibatch visualization at train time.
     # Set to 0 to disable.
     _C.MODEL.GAMBLER_HEAD.VIS_PERIOD = 300
