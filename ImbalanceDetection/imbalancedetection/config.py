@@ -60,6 +60,8 @@ def add_gambler_config(cfg):
     _C.MODEL.GAMBLER_HEAD.SAVE_VIS_FILES = False
     # {{{He/Xavier}_{uniform/normal}}/random}_{unet/unet+prepost}_{bias0/biasrand}
     _C.MODEL.GAMBLER_HEAD.INIT = "random"
+    # prior probability on the last layer of gambler
+    _C.MODEL.GAMBLER_HEAD.PRIOR_PROB = 0.01
     # The period (in terms of steps) for minibatch visualization at train time.
     # Set to 0 to disable.
     _C.MODEL.GAMBLER_HEAD.VIS_PERIOD = 300

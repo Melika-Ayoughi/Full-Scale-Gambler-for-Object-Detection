@@ -4,31 +4,32 @@ MODEL:
 #  WEIGHTS: "./output/gambler/11scales_fix_detector_no_temperature_lambda27500/model_final.pth"
 #  WEIGHTS: "./output/retinanet_baselines/simple_retinanet/simple_retina_overfit/p4_128_11scales/model_final.pth"
 #  WEIGHTS: "./output/gambler/Detector_only/model_0000999.pth"
-#  WEIGHTS: "./output/retinanet_baselines/simple_retinanet/simple_retina_overfit/all_layers_3scales/model_final.pth"
-  WEIGHTS: "./output/retinanet_baselines/simple_retinanet/simple_retina_overfit/all_layers_3scales_sublvis/model_0050999.pth"
+  WEIGHTS: "./output/retinanet_baselines/simple_retinanet/simple_retina_overfit/all_layers_3scales/model_final.pth"
+#  WEIGHTS: "./output/retinanet_baselines/simple_retinanet/simple_retina_overfit/all_layers_3scales_sublvis/model_0050999.pth"
 #  ANCHOR_GENERATOR:
 #    SIZES: !!python/object/apply:eval ["[[x, x * 2**(1.0/3), x * 2**(2.0/3)] for x in [64]]"]
   RETINANET:
-    NUM_CLASSES: 1230 #80
+    NUM_CLASSES: 80 #80
   ROI_HEADS:
-    NUM_CLASSES: 1230 #80
+    NUM_CLASSES: 80 #80
   GAMBLER_HEAD:
     NAME: "LayeredUnetGambler"
     GAMBLER_ITERATIONS: 100
     DETECTOR_ITERATIONS: 0
     GAMBLER_OUTPUT: "L_BCAHW" #"B1HW"
-    GAMBLER_KAPPA: 1000000 # GAMBLER_OUT_CHANNELS*w=28*h=40 #todo: need to change to actual h and w times scales
+    GAMBLER_KAPPA: 1 # GAMBLER_OUT_CHANNELS*w=28*h=40 #todo: need to change to actual h and w times scales
     GAMBLER_OUTSIDE_LAMBDA: 1
     GAMBLER_TEMPERATURE: 1e-20 #1e-20 epsilon is needed for divide by 0
     GAMBLER_LOSS_MODE: "focal"
-    GAMBLER_OUT_CHANNELS: 3690 #240
-    GAMBLER_IN_CHANNELS: 3690 #3*1230
+    GAMBLER_OUT_CHANNELS: 240 #2690
+    GAMBLER_IN_CHANNELS: 240 #3*1230
     BASE_LR: 0.001
     NORMALIZE: True
     BILINEAR_UPSAMPLING: False
-    NUM_CLASSES: 1230 #80
+    NUM_CLASSES: 80 #1230
     IN_LAYERS: [80, 40, 20, 10, 5]
     INIT: "default"
+    PRIOR_PROB: 0.01
 #    SAVE_VIS_FILES: TRUE
 #    GAMBLER_IN_LAYERS: 5
 #    GAMBLER_OUT_LAYERS: 5
@@ -43,16 +44,16 @@ DATASETS:
 #  TEST: ("coco_2017_train_8samples",)
 #  TRAIN: ("coco_2017_train_8_difficult_samples",)
 #  TEST: ("coco_2017_train_8_difficult_samples",)
-#  TRAIN: ("coco_2017_train_100samples",)
-#  TEST: ("coco_2017_train_100samples",)
-  TRAIN: ("lvis_v0.5_train_one_forth",)
-  TEST: ("lvis_v0.5_val",)
+  TRAIN: ("coco_2017_train_100samples",)
+  TEST: ("coco_2017_train_100samples",)
+#  TRAIN: ("lvis_v0.5_train_one_forth",)
+#  TEST: ("lvis_v0.5_val",)
 TEST:
   EVAL_PERIOD: 1000 #500
 SOLVER:
-  STEPS: (50000,)
-  MAX_ITER: 60000
-  CHECKPOINT_PERIOD: 10000
+  STEPS: (8000, 8500)
+  MAX_ITER: 9000
+  CHECKPOINT_PERIOD: 9000
 INPUT:
   MAX_SIZE_TEST: 640
   MAX_SIZE_TRAIN: 640
@@ -62,4 +63,4 @@ INPUT:
   RESIZING: False
 DATALOADER:
     ASPECT_RATIO_GROUPING: False
-OUTPUT_DIR: "./output/gambler/sublvis/kappa1000000"
+OUTPUT_DIR: "./output/gambler/lr+bias/lr0001_1"

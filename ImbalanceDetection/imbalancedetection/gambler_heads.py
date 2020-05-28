@@ -274,6 +274,14 @@ class LayeredUnetGambler(GamblerHeads):
         #             # torch.nn.init.normal_(layer.weight, mean=0, std=0.01)
         #             torch.nn.init.constant_(layer.bias, 0)
 
+        import math
+        prior_prob = cfg.MODEL.GAMBLER_HEAD.PRIOR_PROB
+        bias_value = -math.log((1 - prior_prob) / prior_prob)
+        for modules in [self.postgamblerpredictions]:
+            for layer in modules.modules():
+                if isinstance(layer, nn.Conv2d):
+                    torch.nn.init.constant_(layer.bias, bias_value)
+
         # #todo Use prior in model initialization to improve stability
         # bias_value = -math.log((1 - prior_prob) / prior_prob) # todo how is it calculated???
         # torch.nn.init.constant_(self.up1.bias, bias_value)
