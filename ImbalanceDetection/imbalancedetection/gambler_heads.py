@@ -282,13 +282,6 @@ class LayeredUnetGambler(GamblerHeads):
                 if isinstance(layer, nn.Conv2d):
                     torch.nn.init.constant_(layer.bias, bias_value)
 
-        # #todo Use prior in model initialization to improve stability
-        # bias_value = -math.log((1 - prior_prob) / prior_prob) # todo how is it calculated???
-        # torch.nn.init.constant_(self.up1.bias, bias_value)
-        # torch.nn.init.constant_(self.up2.bias, bias_value)
-        # torch.nn.init.constant_(self.up3.bias, bias_value)
-        # torch.nn.init.constant_(self.up4.bias, bias_value)
-
         self.to(self.device)
 
     def forward(self, input, image):
@@ -399,6 +392,19 @@ class LayeredUnetGambler(GamblerHeads):
             NAKHW_loss = [l.clone().detach().data for l in gambler_loss]
             gambler_loss = list_N_AK_H_W_to_NsumHWA_K(gambler_loss, num_classes=num_classes)
             weights = self.permute_all_weights_to_N_HWA_K_and_concat_(weights, num_classes=num_classes, normalize_w=normalize_w)
+        elif self.cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "L_BAHW":
+            gambler_loss = reverse_list_N_A_K_H_W_to_NsumHWA_K_(valid_loss,
+                                                                self.cfg.MODEL.GAMBLER_HEAD.IN_LAYERS,
+                                                                N,
+                                                                [80, 40, 20, 10, 5],
+                                                                [80, 40, 20, 10, 5],
+                                                                num_scale=len(self.cfg.MODEL.ANCHOR_GENERATOR.SIZES[0]),
+                                                                num_classes=num_classes)
+            # aggregate over classes
+            gambler_loss = [torch.sum(l, dim=[2]) for l in gambler_loss]
+            NAKHW_loss = [l.clone().detach() for l in gambler_loss]
+            gambler_loss = list_N_AK_H_W_to_NsumHWA_K(gambler_loss, num_classes=1)
+            weights = self.permute_all_weights_to_N_HWA_K_and_concat_(weights, num_classes=1, normalize_w=normalize_w)
 
         storage = get_event_storage()
 
@@ -407,11 +413,9 @@ class LayeredUnetGambler(GamblerHeads):
             assert len(nakhw) == 5, "only works with 5 fpn layers"
 
             for i, layer in enumerate(nakhw):  # torch.Size([8, 3, 80, 5, 5])
-                a, _ = layer.max(dim=1, keepdim=False)  # torch.Size([8, 80, 5, 5])
-                a, _ = a.max(dim=1, keepdim=False)  # torch.Size([8, 5, 5])
-                a, _ = a.max(dim=1, keepdim=False)  # torch.Size([8, 5])
-                a, _ = a.max(dim=1, keepdim=False)  # torch.Size([8])
-                max_loss[:, i] = a.data
+                while len(layer.shape) > 1:
+                    layer, _ = layer.max(dim=1, keepdim=False)  # torch.Size([8])
+                max_loss[:, i] = layer.data
             max_loss, _ = max_loss.max(dim=1, keepdim=False)  # torch.Size([8, 5]) -> torch.Size([8])
             # print(max_loss, torch.sum(max_loss))
             return torch.sum(max_loss)

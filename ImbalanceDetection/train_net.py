@@ -184,7 +184,8 @@ def visualize_training_(gt_classes, loss, weights, input_images, storage):
 
     '''
 
-    assert global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "L_BCAHW"
+    assert global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "L_BCAHW" or \
+           global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "L_BAHW"
     device = torch.device(global_cfg.MODEL.DEVICE)
     anchor_scales = len(global_cfg.MODEL.ANCHOR_GENERATOR.SIZES[0])
 
@@ -213,8 +214,10 @@ def visualize_training_(gt_classes, loss, weights, input_images, storage):
                                    "loss")
         os.makedirs(loss_folder, exist_ok=True)
 
-        # loss_layer = torch.sum(loss_layer, dim=2)  # aggregate per class loss
-        loss_layer, _ = loss_layer.max(dim=2, keepdim=False)  # max over all classes at every location
+        if global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT.find('C') != -1:  # If there is a C in it
+            # loss_layer = torch.sum(loss_layer, dim=2)  # aggregate per class loss
+            loss_layer, _ = loss_layer.max(dim=2, keepdim=False)  # max over all classes at every location
+
         loss_layer = normalize_to_01(loss_layer)
         # if multiple scales
         # if multiple aspect ratios
@@ -261,6 +264,10 @@ def visualize_training_(gt_classes, loss, weights, input_images, storage):
             output(img_gt, os.path.join(gt_folder, "scale_" + str(j) + '.png'))
 
     # Prepare betting map **********************************************************************************************
+    if global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT.find('C') != -1:  # If there is a C in it
+        num_classes = global_cfg.MODEL.GAMBLER_HEAD.NUM_CLASSES
+    else:
+        num_classes = 1
 
     weights = reverse_list_N_A_K_H_W_to_NsumHWA_K_(weights,
                                                    [80, 40, 20, 10, 5],#todo
@@ -268,7 +275,7 @@ def visualize_training_(gt_classes, loss, weights, input_images, storage):
                                                    [80, 40, 20, 10, 5],
                                                    [80, 40, 20, 10, 5],
                                                    num_scale=anchor_scales,
-                                                   num_classes=global_cfg.MODEL.GAMBLER_HEAD.NUM_CLASSES)
+                                                   num_classes=num_classes)
     all_weights = []
     for weight_layer, i in zip(weights, global_cfg.MODEL.GAMBLER_HEAD.IN_LAYERS):
         weights_folder = os.path.join(global_cfg.OUTPUT_DIR,
@@ -277,7 +284,13 @@ def visualize_training_(gt_classes, loss, weights, input_images, storage):
                                       "layer_" + str(i),
                                       "weights")
         os.makedirs(weights_folder, exist_ok=True)
-        weight_layer = torch.sum(weight_layer, dim=2)  # aggregate per class weight
+
+        if global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT.find('C') != -1:  # If there is a C in it
+            # weight_layer = torch.sum(weight_layer, dim=2)  # aggregate per class weight
+            weight_layer, _ = weight_layer.max(dim=2, keepdim=False)  # max over all classes at every location
+        else:
+            weight_layer = torch.squeeze(weight_layer)
+
         weight_layer = normalize_to_01(weight_layer)
         for j in range(anchor_scales):
             img_weight = make_grid(weight_layer[:, None, j, :, :], nrow=2, pad_value=1)
