@@ -423,7 +423,6 @@ class GANTrainer(TrainerBase):
         It returns the optimizer for the gambler to be able to control gambler and detector separately
         """
         params: List[Dict[str, Any]] = []
-        # todo ONLY SELECT THE GAMBLER PARAMETERS
         for key, value in gambler_model.named_parameters():
             if not value.requires_grad:
                 continue
@@ -440,10 +439,11 @@ class GANTrainer(TrainerBase):
                 weight_decay = cfg.MODEL.GAMBLER_HEAD.WEIGHT_DECAY_BIAS
             params += [{"params": [value], "lr": lr, "weight_decay": weight_decay}]
 
-        gambler_optimizer = torch.optim.Adam(params, lr)
+        if cfg.MODEL.GAMBLER_HEAD.OPTIMIZER == "adam":
+            gambler_optimizer = torch.optim.Adam(params, lr)
+        elif cfg.MODEL.GAMBLER_HEAD.OPTIMIZER == "sgd":
+            torch.optim.SGD(params, lr, momentum=cfg.MODEL.GAMBLER_HEAD.MOMENTUM)
 
-        # logger = setup_logger(output=cfg.OUTPUT_DIR, distributed_rank=comm.get_rank(), name="imbalance detection")
-        # logger.info("Gambler Optimizer:\n{}".format(gambler_optimizer))
         return gambler_optimizer
 
     @classmethod
