@@ -440,7 +440,7 @@ class GANTrainer(TrainerBase):
                 weight_decay = cfg.MODEL.GAMBLER_HEAD.WEIGHT_DECAY_BIAS
             params += [{"params": [value], "lr": lr, "weight_decay": weight_decay}]
 
-        gambler_optimizer = torch.optim.SGD(params, lr, momentum=cfg.MODEL.GAMBLER_HEAD.MOMENTUM)
+        gambler_optimizer = torch.optim.Adam(params, lr)
 
         # logger = setup_logger(output=cfg.OUTPUT_DIR, distributed_rank=comm.get_rank(), name="imbalance detection")
         # logger.info("Gambler Optimizer:\n{}".format(gambler_optimizer))
