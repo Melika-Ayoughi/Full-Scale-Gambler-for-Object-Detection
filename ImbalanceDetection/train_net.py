@@ -439,10 +439,10 @@ class GANTrainer(TrainerBase):
                 weight_decay = cfg.MODEL.GAMBLER_HEAD.WEIGHT_DECAY_BIAS
             params += [{"params": [value], "lr": lr, "weight_decay": weight_decay}]
 
-        if cfg.MODEL.GAMBLER_HEAD.OPTIMIZER == "adam":
-            gambler_optimizer = torch.optim.Adam(params, lr)
-        elif cfg.MODEL.GAMBLER_HEAD.OPTIMIZER == "sgd":
-            torch.optim.SGD(params, lr, momentum=cfg.MODEL.GAMBLER_HEAD.MOMENTUM)
+        # if cfg.MODEL.GAMBLER_HEAD.OPTIMIZER == "adam":
+        #     gambler_optimizer = torch.optim.Adam(params, lr)
+        # elif cfg.MODEL.GAMBLER_HEAD.OPTIMIZER == "sgd":
+        gambler_optimizer = torch.optim.SGD(params, lr, momentum=cfg.MODEL.GAMBLER_HEAD.MOMENTUM)
 
         return gambler_optimizer
 
