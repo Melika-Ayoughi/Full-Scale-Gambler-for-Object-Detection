@@ -997,17 +997,18 @@ class GANTrainer(TrainerBase):
 
         elif self.iter_D < self.max_iter_detector:
             logger.info(f"Iteration {self.iter} in Detector")
-            betting_map = self.gambler_model(gambler_input)  # (N,AK,H,W)
+            betting_map = self.gambler_model(gambler_input, gambler_image)  # (N,AK,H,W)
             loss_nakhw, loss_before_weighting, loss_gambler, weights = self.gambler_model.sigmoid_gambler_loss(
                 generated_output['pred_class_logits'], betting_map, gt_classes,
                 normalize_w=self.cfg.MODEL.GAMBLER_HEAD.NORMALIZE, detach_pred=False)
 
             if self.vis_period > 0 and self.storage.iter % self.vis_period == 0:
-                visualize_training(gt_classes.clone().detach(), loss_nakhw, weights, input_images, self.storage)
+                visualize_training_(gt_classes.clone().detach(), loss_nakhw, weights, input_images, self.storage)
 
             metrics_dict = self.calc_log_metrics(betting_map, weights, loss_dict, loss_gambler, loss_before_weighting,
                                                  data_time)
 
+            self.gambler_optimizer.zero_grad()
             self.detection_optimizer.zero_grad()
             metrics_dict["loss_detector"].backward()
             torch.nn.utils.clip_grad_norm_(self.detection_model.parameters(), 10)
