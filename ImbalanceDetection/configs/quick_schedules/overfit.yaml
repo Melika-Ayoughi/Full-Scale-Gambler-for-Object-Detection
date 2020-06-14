@@ -5,8 +5,8 @@ MODEL:
 #  WEIGHTS: "./output/retinanet_baselines/simple_retinanet/simple_retina_overfit/p4_128_11scales/model_final.pth"
 #  WEIGHTS: "./output/gambler/Detector_only/model_0000999.pth"
 #  WEIGHTS: "./output/retinanet_baselines/simple_retinanet/simple_retina_overfit/all_layers_3scales/model_final.pth"
-#  WEIGHTS: "./output/retinanet_baselines/simple_retinanet/simple_retina_fullcoco/not_long_enough_all_layers_3scales/model_final.pth"
-  WEIGHTS: "./output/retinanet_baselines/simple_retinanet/simple_retina_fullcoco/all_layers_3scales/model_final.pth"
+  WEIGHTS: "./output/retinanet_baselines/simple_retinanet/simple_retina_fullcoco/not_long_enough_all_layers_3scales/model_final.pth"
+#  WEIGHTS: "./output/retinanet_baselines/simple_retinanet/simple_retina_fullcoco/all_layers_3scales/model_final.pth"
 #  WEIGHTS: "./output/retinanet_baselines/simple_retinanet/simple_retina_overfit/all_layers_3scales_sublvis/model_0050999.pth"
 #  ANCHOR_GENERATOR:
 #    SIZES: !!python/object/apply:eval ["[[x, x * 2**(1.0/3), x * 2**(2.0/3)] for x in [64]]"]
@@ -20,12 +20,13 @@ MODEL:
     DETECTOR_ITERATIONS: 200
     GAMBLER_OUTPUT: "L_BAHW" #"B1HW"
     GAMBLER_KAPPA: 1 # GAMBLER_OUT_CHANNELS*w=28*h=40 #todo: need to change to actual h and w times scales
-    GAMBLER_OUTSIDE_LAMBDA: 1
-    GAMBLER_TEMPERATURE: 0.001 #1e-20 epsilon is needed for divide by 0
+    GAMBLER_OUTSIDE_LAMBDA: 100
+    GAMBLER_TEMPERATURE: 0.00001 #1e-20 epsilon is needed for divide by 0
     GAMBLER_LOSS_MODE: "focal"
+    DETECTOR_LOSS_MODE: "weighted_cls_with_gambler+reg"
     GAMBLER_OUT_CHANNELS: 3 #2690
     GAMBLER_IN_CHANNELS: 240 #3*1230
-    BASE_LR: 0.0001
+    BASE_LR: 0.0005
     NORMALIZE: True
     BILINEAR_UPSAMPLING: False
     NUM_CLASSES: 80 #1230
@@ -33,15 +34,16 @@ MODEL:
     INIT: "default"
     PRIOR_PROB: 0.01
     OPTIMIZER: "sgd"
+#    GAMBLER_GAMMA : 2
 #    SAVE_VIS_FILES: TRUE
 #    GAMBLER_IN_LAYERS: 5
 #    GAMBLER_OUT_LAYERS: 5
 #    IMAGE_MODE: "conv"
 #    IMAGE_CHANNELS: 32
-#    FIXED_CHANNEL: 32
+#    FIXED_CHANNEL: 64
 #    DATA_RANGE: [-0.5, 0.5]
     LOAD_PRETRAINED_GAMBLER: True
-    WEIGHTS: "./output/gambler/1_fullcoco/L_BAHW_beta001/gambler_models/model_0089999.pth"
+    WEIGHTS: "./output/gambler/1_fullcoco/L_BAHW/L_BAHW_beta000001/gambler_models/model_0089999.pth"
 DATASETS:
 #  TRAIN: ("coco_2017_train_8samples",)
 #  TEST: ("coco_2017_train_8samples",)
@@ -54,20 +56,20 @@ DATASETS:
 #  TRAIN: ("lvis_v0.5_train_one_forth",)
 #  TEST: ("lvis_v0.5_val",)
 TEST:
-  EVAL_PERIOD: 1000 #500
+  EVAL_PERIOD: 500 #500
 SOLVER:
-  STEPS: (80000, 85000)
+  STEPS: (70000, 80000)
   MAX_ITER: 100000
-  GAMMA: 0.1
-  CHECKPOINT_PERIOD: 5000
+  GAMMA: 0.5
+  CHECKPOINT_PERIOD: 1000
   BASE_LR: 0.01
 INPUT:
   MAX_SIZE_TEST: 640
   MAX_SIZE_TRAIN: 640
   MIN_SIZE_TEST: 640
   MIN_SIZE_TRAIN: (640, )
-  RANDOM_FLIPPING: False
+  RANDOM_FLIPPING: False #todo: could start by removing this
   RESIZING: False
 DATALOADER:
     ASPECT_RATIO_GROUPING: False
-OUTPUT_DIR: "./output/gambler/1.5_fullcoco/not_long_enoughalllayers3scales_L_BAHW_nobeta_retinalr"
+OUTPUT_DIR: "./output/gambler/1.5_fullcoco/not_long_enough_L_BAHW_different_loss_focal"

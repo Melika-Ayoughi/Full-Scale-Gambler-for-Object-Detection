@@ -439,10 +439,10 @@ class GANTrainer(TrainerBase):
                 weight_decay = cfg.MODEL.GAMBLER_HEAD.WEIGHT_DECAY_BIAS
             params += [{"params": [value], "lr": lr, "weight_decay": weight_decay}]
 
-        # if cfg.MODEL.GAMBLER_HEAD.OPTIMIZER == "adam":
-        #     gambler_optimizer = torch.optim.Adam(params, lr)
-        # elif cfg.MODEL.GAMBLER_HEAD.OPTIMIZER == "sgd":
-        gambler_optimizer = torch.optim.SGD(params, lr, momentum=cfg.MODEL.GAMBLER_HEAD.MOMENTUM)
+        if cfg.MODEL.GAMBLER_HEAD.OPTIMIZER == "adam":
+            gambler_optimizer = torch.optim.Adam(params, lr)
+        elif cfg.MODEL.GAMBLER_HEAD.OPTIMIZER == "sgd":
+            gambler_optimizer = torch.optim.SGD(params, lr, momentum=cfg.MODEL.GAMBLER_HEAD.MOMENTUM)
 
         return gambler_optimizer
 
@@ -903,8 +903,12 @@ class GANTrainer(TrainerBase):
         loss_gambler = loss_gambler * self.gambler_loss_kappa
         loss_dict.update({"loss_gambler": loss_gambler})
         loss_dict.update({"loss_before_weighting": loss_before_weighting})
-        loss_detector = loss_dict["loss_box_reg"] + loss_dict["loss_cls"] - self.gambler_outside_lambda * loss_dict[
-            "loss_gambler"]
+        if self.cfg.MODEL.GAMBLER_HEAD.DETECTOR_LOSS_MODE == "cls+reg-gambler":
+            loss_detector = loss_dict["loss_box_reg"] + loss_dict["loss_cls"] - self.gambler_outside_lambda * loss_dict[
+                "loss_gambler"]
+        elif self.cfg.MODEL.GAMBLER_HEAD.DETECTOR_LOSS_MODE == "weighted_cls_with_gambler+reg":
+            loss_detector = loss_dict["loss_box_reg"] - self.gambler_outside_lambda * loss_dict[
+                "loss_gambler"]
         loss_dict.update({"loss_detector": loss_detector})
 
         self._detect_anomaly(loss_detector, loss_dict)

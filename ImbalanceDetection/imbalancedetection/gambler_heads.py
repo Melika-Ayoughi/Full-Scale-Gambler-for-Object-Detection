@@ -342,6 +342,9 @@ class LayeredUnetGambler(GamblerHeads):
                 gambler_loss = alpha_t * gambler_loss
         elif mode == "sigmoid":
             gambler_loss = ce_loss
+            if alpha >= 0:
+                alpha_t = alpha * gt_classes_target + (1 - alpha) * (1 - gt_classes_target)
+                gambler_loss = alpha_t * gambler_loss
         else:
             logging.error("No mode it selected for the retinanet loss!!")
             gambler_loss = None
@@ -436,7 +439,7 @@ class LayeredUnetGambler(GamblerHeads):
         # storage.put_scalar("sum/max_loss", np.sum(np.array(max_loss)))  # sum over the batch
         # storage.put_scalar("sum/max_weight", np.sum(np.array(max_weights)))  # sum over the batch
 
-        gambler_loss = -weights * gambler_loss
+        gambler_loss = -(weights ** self.cfg.MODEL.GAMBLER_HEAD.GAMBLER_GAMMA) * gambler_loss
 
         if reduction == "mean":
             gambler_loss = gambler_loss.mean()

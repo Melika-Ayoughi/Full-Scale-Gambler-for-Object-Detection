@@ -36,6 +36,8 @@ def add_gambler_config(cfg):
     _C.MODEL.GAMBLER_HEAD.GAMBLER_TEMPERATURE = 0.03
     # classification loss used in the gambler can be either "sigmoid" or "focal"
     _C.MODEL.GAMBLER_HEAD.GAMBLER_LOSS_MODE = "focal"
+    # detector loss can be either cls+reg-gambler or weighted_cls_with_gambler+reg
+    _C.MODEL.GAMBLER_HEAD.DETECTOR_LOSS_MODE = "cls+reg-gambler"
     # normalizing the weights of the gambler, turned off for sanity check that gambler is learning
     _C.MODEL.GAMBLER_HEAD.NORMALIZE = True
     # adjusting the range of the data given to the gambler
@@ -64,6 +66,8 @@ def add_gambler_config(cfg):
     _C.MODEL.GAMBLER_HEAD.PRIOR_PROB = 0.01
     # gambler optimizer: sgd or adam
     _C.MODEL.GAMBLER_HEAD.OPTIMIZER = "sgd"
+    # bettingmap goes to the power of gamma to control focus on bets, if 0 -> normal bce loss
+    _C.MODEL.GAMBLER_HEAD.GAMBLER_GAMMA = 1
     # The period (in terms of steps) for minibatch visualization at train time.
     # Set to 0 to disable.
     _C.MODEL.GAMBLER_HEAD.VIS_PERIOD = 300
