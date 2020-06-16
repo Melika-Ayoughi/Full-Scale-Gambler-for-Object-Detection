@@ -134,6 +134,11 @@ class TensorboardXWriter(EventWriter):
                 self._writer.add_figure(fig_name, fig, step_num)
             storage.clear_figures()
 
+        if len(storage.vis_hist) >= 1:
+            for hist_name, hist, step_num in storage.vis_hist:
+                self._writer.add_histogram(hist_name, hist, step_num)
+            storage.clear_histograms()
+
     def close(self):
         if hasattr(self, "_writer"):  # doesn't exist when the code fails at import
             self._writer.close()
@@ -224,6 +229,27 @@ class EventStorage:
         self._current_prefix = ""
         self._vis_data = []
         self._vis_fig = []
+        self._vis_hist = []
+
+    def put_hist(self, hist_name, hist):
+        """
+        Add an `img_tensor` to the `_vis_data` associated with `img_name`.
+        Args:
+            fig_name (str): The name of the image to put into tensorboard.
+            figure (torch.Tensor or numpy.array): An `uint8` or `float`
+                Tensor of shape `[channel, height, width]` where `channel` is
+                3. The image format should be RGB. The elements in img_tensor
+                can either have values in [0, 1] (float32) or [0, 255] (uint8).
+                The `img_tensor` will be visualized in tensorboard.
+        """
+        self._vis_hist.append((hist_name, hist, self._iter))
+
+    def clear_histograms(self):
+        """
+        Delete all the stored figures for visualization. This should be called
+        after figures are written to tensorboard.
+        """
+        self._vis_hist = []
 
     def put_fig(self, fig_name, figure):
         """
@@ -366,6 +392,10 @@ class EventStorage:
     @property
     def vis_data(self):
         return self._vis_data
+
+    @property
+    def vis_hist(self):
+        return self._vis_hist
 
     @property
     def iter(self):
