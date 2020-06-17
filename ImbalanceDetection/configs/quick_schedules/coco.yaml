@@ -1,0 +1,45 @@
+_BASE_: "./simple_retinanet.yaml"
+SEED: 57330821
+MODEL:
+#  WEIGHTS: "./output/retinanet_baselines/simple_retinanet/simple_retina_overfit/all_layers_3scales/model_final.pth"
+#  WEIGHTS: "./output/retinanet_baselines/simple_retinanet/simple_retina_overfit/all_layers_3scales_sublvis/model_0050999.pth"
+#  WEIGHTS: "./output/retinanet_baselines/simple_retinanet/simple_retina_fullcoco/not_long_enough_all_layers_3scales/model_final.pth"
+  WEIGHTS: "./output/retinanet_baselines/simple_retinanet/simple_retina_fullcoco/all_layers_3scales/model_final.pth"
+  RETINANET:
+    NUM_CLASSES: 80
+  ROI_HEADS:
+    NUM_CLASSES: 80
+  GAMBLER_HEAD:
+    LOAD_PRETRAINED_GAMBLER: True
+    WEIGHTS: "./output/gambler/1_fullcoco/L_BAHW/L_BAHW_beta001/gambler_models/model_0089999.pth"
+    NAME: "LayeredUnetGambler"
+    GAMBLER_ITERATIONS: 20
+    DETECTOR_ITERATIONS: 40
+    GAMBLER_OUTPUT: "L_BAHW"
+    GAMBLER_KAPPA: 1
+    GAMBLER_OUTSIDE_LAMBDA: 1
+    GAMBLER_TEMPERATURE: 0.01 #1e-20 epsilon is needed for divide by 0
+    GAMBLER_LOSS_MODE: "sigmoid"
+    DETECTOR_LOSS_MODE: "cls+reg-gambler"
+    GAMBLER_OUT_CHANNELS: 3 #2690
+    GAMBLER_IN_CHANNELS: 240 #240 or 3*1230 = 3690
+    BASE_LR: 0.0001
+    NORMALIZE: True
+    BILINEAR_UPSAMPLING: False
+    NUM_CLASSES: 80
+    IN_LAYERS: [80, 40, 20, 10, 5]
+    INIT: "default"
+    PRIOR_PROB: 0.01
+    OPTIMIZER: "adam"
+#    GAMBLER_GAMMA : 2
+#    SAVE_VIS_FILES: TRUE
+#    IMAGE_MODE: "conv"
+#    IMAGE_CHANNELS: 32
+#    FIXED_CHANNEL: 64
+    DATA_RANGE: [-11.11, 11.11] #random
+DATASETS:
+#  TRAIN: ("coco_2017_train_100samples",)
+#  TEST: ("coco_2017_train_100samples",)
+  TRAIN: ("coco_2017_train",)
+  TEST: ("coco_2017_val",)
+OUTPUT_DIR: "./output/gambler/2_full_coco/first_train_both"

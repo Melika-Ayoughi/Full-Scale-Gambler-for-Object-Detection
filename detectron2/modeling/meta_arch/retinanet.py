@@ -136,8 +136,8 @@ class RetinaNet(nn.Module):
 
         if self.training:
             gt_classes, gt_anchors_reg_deltas = self.get_ground_truth(anchors, gt_instances)
-            # todo: [0] because output of fpn is still a list
-            return images.tensor, {"pred_class_logits": box_cls, "pred_proposal_deltas": box_delta}, gt_classes, self.losses(gt_classes, gt_anchors_reg_deltas, box_cls, box_delta)
+            return images.tensor, {"pred_class_logits": box_cls, "pred_proposal_deltas": box_delta}, gt_classes, \
+                   self.losses(gt_classes, gt_anchors_reg_deltas, box_cls, box_delta)
         else:
             results = self.inference(box_cls, box_delta, anchors, images)
             processed_results = []

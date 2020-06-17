@@ -13,6 +13,19 @@ from detectron2.layers import cat
 logger = logging.getLogger(__name__)
 
 
+def get_loss_upper_bound(nakhw, N):
+    max_loss = torch.empty(N, 5)
+    assert len(nakhw) == 5, "only works with 5 fpn layers"
+
+    for i, layer in enumerate(nakhw):  # torch.Size([8, 3, 80, 5, 5])
+        while len(layer.shape) > 1:
+            layer, _ = layer.max(dim=1, keepdim=False)  # torch.Size([8])
+        max_loss[:, i] = layer.data
+    max_loss, _ = max_loss.max(dim=1, keepdim=False)  # torch.Size([8, 5]) -> torch.Size([8])
+    # print(max_loss, torch.sum(max_loss))
+    return torch.sum(max_loss)
+
+
 def N_AK_H_W_to_N_HWA_K(tensor, K):
     """
     Transpose/reshape a tensor from (N, (A x K), H, W) to (N, (HxWxA), K)
@@ -150,7 +163,7 @@ class UnetGambler(GamblerHeads):
     def forward(self, input):
         return self.gambler(input)
 
-    def sigmoid_gambler_loss(self, pred_class_logits, weights, gt_classes, normalize_w=False, detach_pred=False, reduction="sum"):
+    def gambler_loss(self, pred_class_logits, weights, gt_classes, normalize_w=False, detach_pred=False, reduction="sum"):
         '''
 
         Args:
@@ -253,8 +266,6 @@ class UnetGambler(GamblerHeads):
 class LayeredUnetGambler(GamblerHeads):
     def __init__(self, cfg):
         super().__init__(cfg)
-        # in_layers = cfg.MODEL.GAMBLER_HEAD.GAMBLER_IN_LAYERS
-        # out_layers = cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUT_LAYERS
 
         image_mode = cfg.MODEL.GAMBLER_HEAD.IMAGE_MODE #conv or downsample
         self.image_channels = cfg.MODEL.GAMBLER_HEAD.IMAGE_CHANNELS
@@ -285,7 +296,20 @@ class LayeredUnetGambler(GamblerHeads):
 
         self.to(self.device)
 
-    def forward(self, input, image):
+    def forward(self, image, pred_class_logits, gt_classes, detach_pred):
+        """
+
+        Args:
+            image: the image batch tensor
+            pred_class_logits:
+            gt_classes:
+            detach_pred:
+
+        Returns:
+
+        """
+        input, image = self.preprocess_input(pred_class_logits, image)
+
         # prepare the input:
         if self.image_channels == 0:
             im = None
@@ -294,22 +318,26 @@ class LayeredUnetGambler(GamblerHeads):
 
         pred = self.pregamblerpredictions(input)
         out1 = self.layered_gambler(pred, im)  # out1 = ['p7', 'p6', 'p5', 'p4', 'p3']
-        out2 = self.postgamblerpredictions(out1)  # out2 = ['p3', 'p4', 'p5', 'p6', 'p7']
-        return out2
+        betting_map = self.postgamblerpredictions(out1)  # out2 = ['p3', 'p4', 'p5', 'p6', 'p7']
+        loss_dict, weights = self.gambler_loss(pred_class_logits, betting_map, gt_classes, detach_pred=detach_pred)
 
-    def sigmoid_gambler_loss(self, pred_class_logits, weights, gt_classes, normalize_w=False, detach_pred=False, reduction="sum"):
-        '''
+        return loss_dict, weights, betting_map
 
+    def gambler_loss(self, pred_class_logits, weights, gt_classes, detach_pred=False):
+        """
         Args:
             pred_class_logits: list of tensors, each tensor is [batch, #class_categories * anchors per location, w, h]
             weights: [batch, #anchors per location/#classes/ classes*anchors per location, w, h]
             gt_classes: [batch, #all_anchors = w * h * anchors per location]
-            normalize_w:
-            detach_pred:
+            detach_pred: if True predictions are detached from the computation graph (for gambler training)
 
         Returns:
+            loss_dict: dict = {"NAKHW_loss",
+                     "loss_before_weighting",
+                     "gambler_loss"}
+            weights: normalized betting map
+        """
 
-        '''
         # todo function to get size of H & W from the predictions
         [N, _, H, W] = pred_class_logits[0].shape
         if detach_pred is True:
@@ -353,11 +381,11 @@ class LayeredUnetGambler(GamblerHeads):
             cls_loss = None
 
         # ignore the invalid ids in loss
-        valid_loss = torch.zeros_like(cls_loss)  # todo: backprop
+        valid_loss = torch.zeros_like(cls_loss)
         valid_loss[valid_idxs, :] = cls_loss[valid_idxs, :]
 
         #todo function to get size of H & W from the predictions
-
+        normalize_w = self.cfg.MODEL.GAMBLER_HEAD.NORMALIZE
         if self.cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "B1HW":
             # gambler loss: ‌N,AK,H,W
             cls_loss = reverse_list_N_A_K_H_W_to_NsumHWA_K_(valid_loss, self.cfg.MODEL.GAMBLER_HEAD.IN_LAYERS, N, H, W, num_classes)
@@ -389,23 +417,23 @@ class LayeredUnetGambler(GamblerHeads):
         elif self.cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "L_BCAHW":
             # gambler loss: ‌N,AK,H,W
             cls_loss = reverse_list_N_A_K_H_W_to_NsumHWA_K_(valid_loss,
-                                                                self.cfg.MODEL.GAMBLER_HEAD.IN_LAYERS,
-                                                                N,
-                                                                [80, 40, 20, 10, 5],
-                                                                [80, 40, 20, 10, 5],
-                                                                num_scale=len(self.cfg.MODEL.ANCHOR_GENERATOR.SIZES[0]),
-                                                                num_classes=num_classes)
+                                                            self.cfg.MODEL.GAMBLER_HEAD.IN_LAYERS,
+                                                            N,
+                                                            [80, 40, 20, 10, 5],
+                                                            [80, 40, 20, 10, 5],
+                                                            num_scale=len(self.cfg.MODEL.ANCHOR_GENERATOR.SIZES[0]),
+                                                            num_classes=num_classes)
             NAKHW_loss = [l.clone().detach().data for l in cls_loss]
             cls_loss = list_N_AK_H_W_to_NsumHWA_K(cls_loss, num_classes=num_classes)
             weights = self.permute_all_weights_to_N_HWA_K_and_concat_(weights, num_classes=num_classes, normalize_w=normalize_w)
         elif self.cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "L_BAHW":
             cls_loss = reverse_list_N_A_K_H_W_to_NsumHWA_K_(valid_loss,
-                                                                self.cfg.MODEL.GAMBLER_HEAD.IN_LAYERS,
-                                                                N,
-                                                                [80, 40, 20, 10, 5],
-                                                                [80, 40, 20, 10, 5],
-                                                                num_scale=len(self.cfg.MODEL.ANCHOR_GENERATOR.SIZES[0]),
-                                                                num_classes=num_classes)
+                                                            self.cfg.MODEL.GAMBLER_HEAD.IN_LAYERS,
+                                                            N,
+                                                            [80, 40, 20, 10, 5],
+                                                            [80, 40, 20, 10, 5],
+                                                            num_scale=len(self.cfg.MODEL.ANCHOR_GENERATOR.SIZES[0]),
+                                                            num_classes=num_classes)
             # aggregate over classes
             cls_loss = [torch.sum(l, dim=[2]) for l in cls_loss]
             NAKHW_loss = [l.clone().detach() for l in cls_loss]
@@ -413,20 +441,7 @@ class LayeredUnetGambler(GamblerHeads):
             weights = self.permute_all_weights_to_N_HWA_K_and_concat_(weights, num_classes=1, normalize_w=normalize_w)
 
         storage = get_event_storage()
-
-        def get_loss_upper_bound(nakhw):
-            max_loss = torch.empty(self.cfg.SOLVER.IMS_PER_BATCH, 5)
-            assert len(nakhw) == 5, "only works with 5 fpn layers"
-
-            for i, layer in enumerate(nakhw):  # torch.Size([8, 3, 80, 5, 5])
-                while len(layer.shape) > 1:
-                    layer, _ = layer.max(dim=1, keepdim=False)  # torch.Size([8])
-                max_loss[:, i] = layer.data
-            max_loss, _ = max_loss.max(dim=1, keepdim=False)  # torch.Size([8, 5]) -> torch.Size([8])
-            # print(max_loss, torch.sum(max_loss))
-            return torch.sum(max_loss)
-
-        storage.put_scalar("loss_gambler/lower_bound", -get_loss_upper_bound(NAKHW_loss))
+        storage.put_scalar("loss_gambler/lower_bound", -get_loss_upper_bound(NAKHW_loss, N))
         # with open(os.path.join(self.cfg.OUTPUT_DIR, "weights‌.csv"), "a") as my_csv:
         #     max_loss = []
         #     max_weights = []
@@ -456,7 +471,39 @@ class LayeredUnetGambler(GamblerHeads):
         else:
             raise Exception("No mode it selected for the retinanet loss!!")
 
-        return NAKHW_loss, loss_before_weighting, gambler_loss, weights.clone().detach()
+        loss_dict = {"NAKHW_loss": NAKHW_loss,
+                     "loss_before_weighting": loss_before_weighting,
+                     "gambler_loss": gambler_loss}
+
+        return loss_dict, weights.clone().detach()
+
+    def preprocess_input(self, pred_class_logits, input_images):
+        if len(self.cfg.MODEL.RETINANET.IN_FEATURES) > 1:
+            logging.debug("Mode: multiple FPN layers")
+            if self.cfg.MODEL.GAMBLER_HEAD.DATA_RANGE == [-0.5, 0.5]:
+                scaled_prob = [torch.sigmoid(pred) - 0.5 for pred in pred_class_logits]
+            elif self.cfg.MODEL.GAMBLER_HEAD.DATA_RANGE == [-128, 128]:
+                scaled_prob = [(torch.sigmoid(pred) - 0.5) * 256 for pred in pred_class_logits]
+            else:
+                scaled_prob = [ torch.sigmoid(pred) for pred in pred_class_logits]
+            return scaled_prob, input_images
+        else:
+            logging.debug("Mode: one FPN layer")
+            if input_images is None:
+                raise Exception("one fpn layer always needs the input image for concatenation!")
+            stride = 16  # todo: stride depends on feature map layer
+            input_images = F.interpolate(input_images, scale_factor=1 / stride, mode='bilinear')
+            sigmoid_predictions = torch.sigmoid(pred_class_logits[0])
+
+            if self.cfg.MODEL.GAMBLER_HEAD.DATA_RANGE == [-0.5, 0.5]:
+                scaled_prob = (sigmoid_predictions - 0.5)
+                input_images = (input_images / 256.0)
+            elif self.cfg.MODEL.GAMBLER_HEAD.DATA_RANGE == [-128, 128]:
+                scaled_prob = (sigmoid_predictions - 0.5) * 256
+
+            # concatenate along the channel
+            gambler_input = torch.cat((input_images, scaled_prob), dim=1)  # (N,3+AK,H,W)
+            return gambler_input, input_images
 
 
 @GAMBLER_HEAD_REGISTRY.register()

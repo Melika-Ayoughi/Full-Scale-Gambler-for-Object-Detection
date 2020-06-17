@@ -7,24 +7,27 @@ MODEL:
     NUM_CLASSES: 80 #1230
 #    SCORE_THRESH_TEST: 0.0001
   ANCHOR_GENERATOR:
-#    SIZES: !!python/object/apply:eval ["[[x * 2**(-5.0/6), x * 2**(-4.0/6), x * 2**(-3.0/6), x * 2**(-2.0/6), x * 2**(-1.0/6), x, x * 2**(1.0/6), x * 2**(2.0/6), x * 2**(3.0/6), x * 2**(4.0/6), x * 2**(5.0/6)] for x in [128]]"] #multiple scales
     SIZES: !!python/object/apply:eval ["[[x, x * 2**(1.0/3), x * 2**(2.0/3) ] for x in [32, 64, 128, 256, 512]]"]
-    ASPECT_RATIOS: [[1.0]]  # 1 aspect ratio
+    ASPECT_RATIOS: [[1.0]]
   RETINANET:
     NUM_CLASSES: 80
-    IN_FEATURES: ["p3", "p4", "p5", "p6", "p7"] # 1 feature map layer - p3 is stride 8 - original retinanet ["p3", "p4", "p5", "p6", "p7"]
-  GAMBLER_HEAD:
-    BASE_LR: 0.001
-#TEST:
-#  DETECTIONS_PER_IMAGE: 300  # LVIS allows up to 300
+    IN_FEATURES: ["p3", "p4", "p5", "p6", "p7"]
 TEST:
-    EVAL_PERIOD: 2250
+  EVAL_PERIOD: 1000 #500
 SOLVER:
-  IMS_PER_BATCH: 8
-  BASE_LR: 0.02
-  WARMUP_FACTOR: 0.00333333
-  WARMUP_ITERS: 300
-  STEPS: (43000,)
-  MAX_ITER: 45000
-  CHECKPOINT_PERIOD: 2250
+  STEPS: (105000, 120000)
+  MAX_ITER: 135000
+  GAMMA: 0.5
+  CHECKPOINT_PERIOD: 10000
+  BASE_LR: 0.01
+  IMS_PER_BATCH: 16 #16
+INPUT:
+  MAX_SIZE_TEST: 640
+  MAX_SIZE_TRAIN: 640
+  MIN_SIZE_TEST: 640
+  MIN_SIZE_TRAIN: (640, )
+  RANDOM_FLIPPING: False
+  RESIZING: False
+DATALOADER:
+    ASPECT_RATIO_GROUPING: False
 OUTPUT_DIR: "./output/gambler/debug"

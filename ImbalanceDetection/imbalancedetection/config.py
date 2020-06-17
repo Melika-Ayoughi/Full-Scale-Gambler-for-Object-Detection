@@ -44,10 +44,6 @@ def add_gambler_config(cfg):
     _C.MODEL.GAMBLER_HEAD.DATA_RANGE = [-128, 128]
     # If True, in unet gambler upsampling is done with bilinear interpolation, o.w. with TransposeConv
     _C.MODEL.GAMBLER_HEAD.BILINEAR_UPSAMPLING = True
-    # number of FPN layers going into gambler
-    _C.MODEL.GAMBLER_HEAD.GAMBLER_IN_LAYERS = 5
-    # number of FPN layers coming out of gambler
-    _C.MODEL.GAMBLER_HEAD.GAMBLER_OUT_LAYERS = 5
     # original image is "downsample" or "conv" and then concatenated with predictions
     _C.MODEL.GAMBLER_HEAD.IMAGE_MODE = "downsample"
     # If image mode is downsample, image_channels has to be 3, otherwise it's a hyperparam

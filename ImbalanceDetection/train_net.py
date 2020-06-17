@@ -186,6 +186,8 @@ def visualize_training_(gt_classes, loss, weights, input_images, storage):
 
     assert global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "L_BCAHW" or \
            global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "L_BAHW"
+    [N, _, _, _] = input_images.shape
+
     device = torch.device(global_cfg.MODEL.DEVICE)
     anchor_scales = len(global_cfg.MODEL.ANCHOR_GENERATOR.SIZES[0])
 
@@ -235,7 +237,7 @@ def visualize_training_(gt_classes, loss, weights, input_images, storage):
     from imbalancedetection.gambler_heads import reverse_list_N_A_K_H_W_to_NsumHWA_K_
     gt = reverse_list_N_A_K_H_W_to_NsumHWA_K_(gt_classes,
                                               [80, 40, 20, 10, 5], #todo
-                                              8,
+                                              N,
                                               [80, 40, 20, 10, 5],
                                               [80, 40, 20, 10, 5],
                                               num_scale=anchor_scales,
@@ -271,7 +273,7 @@ def visualize_training_(gt_classes, loss, weights, input_images, storage):
 
     weights = reverse_list_N_A_K_H_W_to_NsumHWA_K_(weights,
                                                    [80, 40, 20, 10, 5],#todo
-                                                   8,
+                                                   N,
                                                    [80, 40, 20, 10, 5],
                                                    [80, 40, 20, 10, 5],
                                                    num_scale=anchor_scales,
@@ -337,13 +339,11 @@ class GANTrainer(TrainerBase):
 
         # For training, wrap with DDP. But don't need this for inference.
         if comm.get_world_size() > 1:
-            self.gambler_model = DistributedDataParallel(
-                self.gambler_model, device_ids=[comm.get_local_rank()], broadcast_buffers=False
-            )
-            self.detection_model = DistributedDataParallel(
-                self.detection_model, device_ids=[comm.get_local_rank()], broadcast_buffers=False,
-                find_unused_parameters=True,
-            )
+            self.gambler_model = DistributedDataParallel(self.gambler_model, device_ids=[comm.get_local_rank()],
+                                                         broadcast_buffers=False, find_unused_parameters=True)
+
+            self.detection_model = DistributedDataParallel(self.detection_model, device_ids=[comm.get_local_rank()],
+                                                           broadcast_buffers=False, find_unused_parameters=True)
 
         self.data_loader = data_loader
         self._data_loader_iter = iter(data_loader)
@@ -898,12 +898,10 @@ class GANTrainer(TrainerBase):
                                                                                                   -1)) * self.gambler_loss_kappa
         return loss_gambler
 
-    def calc_log_metrics(self, betting_map, weights, loss_dict, loss_gambler, loss_before_weighting, data_time):
-
+    def calc_log_metrics(self, betting_map, weights, loss_dict, gambler_loss_dict, data_time):
         loss_dict.update({"loss_box_reg": loss_dict["loss_box_reg"] * self.regression_loss_lambda})
-        loss_gambler = loss_gambler * self.gambler_loss_kappa
-        loss_dict.update({"loss_gambler": loss_gambler})
-        loss_dict.update({"loss_before_weighting": loss_before_weighting})
+        loss_dict.update({"loss_gambler": gambler_loss_dict["gambler_loss"] * self.gambler_loss_kappa })
+        loss_dict.update({"loss_before_weighting": gambler_loss_dict["loss_before_weighting"]})
         if self.cfg.MODEL.GAMBLER_HEAD.DETECTOR_LOSS_MODE == "cls+reg-gambler":
             loss_detector = loss_dict["loss_box_reg"] + loss_dict["loss_cls"] - self.gambler_outside_lambda * loss_dict[
                 "loss_gambler"]
@@ -913,7 +911,7 @@ class GANTrainer(TrainerBase):
         loss_dict.update({"loss_detector": loss_detector})
 
         self._detect_anomaly(loss_detector, loss_dict)
-        self._detect_anomaly(loss_gambler, loss_dict)
+        self._detect_anomaly(loss_dict["loss_gambler"], loss_dict)
 
         sum_bets_all_layers = 0
         max_bets_all_layers = 0
@@ -937,33 +935,6 @@ class GANTrainer(TrainerBase):
 
         return loss_dict
 
-    @staticmethod
-    def prepare_input_gambler(cfg, generated_output, input_images):
-        if len(cfg.MODEL.RETINANET.IN_FEATURES) > 1:
-            logging.debug("Mode: multiple FPN layers")
-            if global_cfg.MODEL.GAMBLER_HEAD.DATA_RANGE == [-0.5, 0.5]:
-                scaled_prob = [torch.sigmoid(pred) - 0.5 for pred in generated_output['pred_class_logits']]
-            elif global_cfg.MODEL.GAMBLER_HEAD.DATA_RANGE == [-128, 128]:
-                scaled_prob = [(torch.sigmoid(pred) - 0.5) * 256 for pred in generated_output['pred_class_logits']]
-            return scaled_prob, input_images
-        else:
-            logging.debug("Mode: one FPN layer")
-            if input_images is None:
-                raise Exception("one fpn layer always needs the input image for concatenation!")
-            stride = 16  # todo: stride depends on feature map layer
-            input_images = F.interpolate(input_images, scale_factor=1 / stride, mode='bilinear')
-            sigmoid_predictions = torch.sigmoid(generated_output['pred_class_logits'][0])
-
-            if global_cfg.MODEL.GAMBLER_HEAD.DATA_RANGE == [-0.5, 0.5]:
-                scaled_prob = (sigmoid_predictions - 0.5)
-                input_images = (input_images / 256.0)
-            elif global_cfg.MODEL.GAMBLER_HEAD.DATA_RANGE == [-128, 128]:
-                scaled_prob = (sigmoid_predictions - 0.5) * 256
-
-            # concatenate along the channel
-            gambler_input = torch.cat((input_images, scaled_prob), dim=1)  # (N,3+AK,H,W)
-            return gambler_input, input_images
-
     def run_step(self):
         """
         Overwrites the run_step() function of SimpleTrainer(TrainerBase) to be compatible with GAN learning
@@ -977,21 +948,20 @@ class GANTrainer(TrainerBase):
         data = next(self._data_loader_iter)
         data_time = time.perf_counter() - start
 
-        input_images, generated_output, gt_classes, loss_dict = self.detection_model(data)
-        gambler_input, gambler_image = self.prepare_input_gambler(self.cfg, generated_output, input_images)
-
         if self.iter_G < self.max_iter_gambler:
             logger.info(f"Iteration {self.iter} in Gambler")
-            betting_map = self.gambler_model(gambler_input, gambler_image)  # (N,AK,H,W)
-            loss_nakhw, loss_before_weighting, loss_gambler, weights = self.gambler_model.sigmoid_gambler_loss(
-                generated_output['pred_class_logits'], betting_map, gt_classes,
-                normalize_w=self.cfg.MODEL.GAMBLER_HEAD.NORMALIZE, detach_pred=True)
+            with torch.no_grad():
+                input_images, generated_output, gt_classes, loss_dict = self.detection_model(data)
+            gambler_loss_dict, weights, betting_map = self.gambler_model(input_images,
+                                                                         generated_output['pred_class_logits'],
+                                                                         gt_classes,
+                                                                         detach_pred=True)  # (N,AK,H,W)
 
             if self.vis_period > 0 and self.storage.iter % self.vis_period == 0:
-                visualize_training_(gt_classes.clone().detach(), loss_nakhw, weights, input_images, self.storage)
+                visualize_training_(gt_classes.clone().detach(), gambler_loss_dict["NAKHW_loss"],
+                                    weights, input_images, self.storage)
 
-            metrics_dict = self.calc_log_metrics(betting_map, weights, loss_dict, loss_gambler, loss_before_weighting,
-                                                 data_time)
+            metrics_dict = self.calc_log_metrics(betting_map, weights, loss_dict, gambler_loss_dict, data_time)
 
             self.gambler_optimizer.zero_grad()
             metrics_dict["loss_gambler"].backward()
@@ -1002,16 +972,17 @@ class GANTrainer(TrainerBase):
 
         elif self.iter_D < self.max_iter_detector:
             logger.info(f"Iteration {self.iter} in Detector")
-            betting_map = self.gambler_model(gambler_input, gambler_image)  # (N,AK,H,W)
-            loss_nakhw, loss_before_weighting, loss_gambler, weights = self.gambler_model.sigmoid_gambler_loss(
-                generated_output['pred_class_logits'], betting_map, gt_classes,
-                normalize_w=self.cfg.MODEL.GAMBLER_HEAD.NORMALIZE, detach_pred=False)
+            input_images, generated_output, gt_classes, loss_dict = self.detection_model(data)
+            gambler_loss_dict, weights, betting_map = self.gambler_model(input_images,
+                                                                         generated_output['pred_class_logits'],
+                                                                         gt_classes,
+                                                                         detach_pred=False)  # (N,AK,H,W)
 
             if self.vis_period > 0 and self.storage.iter % self.vis_period == 0:
-                visualize_training_(gt_classes.clone().detach(), loss_nakhw, weights, input_images, self.storage)
+                visualize_training_(gt_classes.clone().detach(), gambler_loss_dict["NAKHW_loss"],
+                                    weights, input_images, self.storage)
 
-            metrics_dict = self.calc_log_metrics(betting_map, weights, loss_dict, loss_gambler, loss_before_weighting,
-                                                 data_time)
+            metrics_dict = self.calc_log_metrics(betting_map, weights, loss_dict, gambler_loss_dict, data_time)
 
             self.gambler_optimizer.zero_grad()
             self.detection_optimizer.zero_grad()

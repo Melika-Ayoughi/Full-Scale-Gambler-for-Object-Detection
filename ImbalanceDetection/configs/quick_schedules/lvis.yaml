@@ -1,0 +1,43 @@
+_BASE_: "./simple_retinanet.yaml"
+SEED: 57330821
+MODEL:
+  WEIGHTS: "./output/retinanet_baselines/simple_retinanet/simple_retina_fulllvis/all_layers_3scales_lvis/model_0089999.pth"
+  RETINANET:
+    NUM_CLASSES: 1230
+  ROI_HEADS:
+    NUM_CLASSES: 1230
+  GAMBLER_HEAD:
+    LOAD_PRETRAINED_GAMBLER: True
+    WEIGHTS: "./output/gambler/sublvis/kappa1000000/model_0009999.pth" #the onlu pretrained model on gambler
+    NAME: "LayeredUnetGambler"
+    GAMBLER_ITERATIONS: 200
+    DETECTOR_ITERATIONS: 400
+    GAMBLER_OUTPUT: "L_BAHW" #"B1HW"
+    GAMBLER_KAPPA: 1
+    GAMBLER_OUTSIDE_LAMBDA: 1
+    GAMBLER_TEMPERATURE: 0.01 #1e-20 epsilon is needed for divide by 0
+    GAMBLER_LOSS_MODE: "sigmoid"
+    DETECTOR_LOSS_MODE: "cls+reg-gambler"
+    GAMBLER_OUT_CHANNELS: 3
+    GAMBLER_IN_CHANNELS: 3690 #3*1230
+    BASE_LR: 0.0001
+    NORMALIZE: True
+    BILINEAR_UPSAMPLING: False
+    NUM_CLASSES: 1230
+    IN_LAYERS: [80, 40, 20, 10, 5]
+    INIT: "default"
+    PRIOR_PROB: 0.01
+    OPTIMIZER: "adam"
+#    GAMBLER_GAMMA : 2
+#    SAVE_VIS_FILES: TRUE
+#    IMAGE_MODE: "conv"
+#    IMAGE_CHANNELS: 32
+#    FIXED_CHANNEL: 64
+#    DATA_RANGE: [-0.5, 0.5]
+DATASETS:
+#  TRAIN: ("lvis_v0.5_train",)
+  TRAIN: ("lvis_v0.5_train_one_forth",)
+  TEST: ("lvis_v0.5_val",)
+TEST:
+  DETECTIONS_PER_IMAGE: 300  # LVIS allows up to 300
+OUTPUT_DIR: "./output/gambler/2_full_lvis/first_train_both"
