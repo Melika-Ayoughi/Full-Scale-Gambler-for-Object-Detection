@@ -281,6 +281,7 @@ class COCOEvaluator(DatasetEvaluator):
         fig = plt.figure(figsize=(10, 8))
         plt.bar(bins, height=a[:, 1].astype(float), color='#F6CD61')
         plt.xticks(bins, np.array(class_names)[ind_sorted], rotation=90, fontsize=5)
+        plt.ylim(bottom=0, top=60)
         storage = get_event_storage()
         storage.put_fig("AP", fig)
         fig.savefig(os.path.join(global_cfg.OUTPUT_DIR, "AP_"+str(storage.iter)+".pdf"))
