@@ -293,10 +293,10 @@ def visualize_training_(gt_classes, loss, weights, input_images, storage):
         else:
             weight_layer = torch.squeeze(weight_layer)
 
-        # weight_layer = normalize_to_01(weight_layer)
+        weight_layer_for_vis = normalize_to_01(weight_layer)
         for j in range(anchor_scales):
             storage.put_hist(f"weights/layer{i}/scale{j}", weight_layer[:, None, j, :, :])
-            img_weight = make_grid(weight_layer[:, None, j, :, :], nrow=2, pad_value=1)
+            img_weight = make_grid(weight_layer_for_vis[:, None, j, :, :], nrow=2, pad_value=1)
             if j == 0:
                 all_weights.append(img_weight)
             else:
