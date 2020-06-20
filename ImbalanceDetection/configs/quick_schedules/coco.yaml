@@ -42,4 +42,4 @@ DATASETS:
 #  TEST: ("coco_2017_train_100samples",)
   TRAIN: ("coco_2017_train",)
   TEST: ("coco_2017_val",)
-OUTPUT_DIR: "./output/gambler/debug"
+OUTPUT_DIR: "./output/gambler/2_full_coco/smoothing/temp001/"

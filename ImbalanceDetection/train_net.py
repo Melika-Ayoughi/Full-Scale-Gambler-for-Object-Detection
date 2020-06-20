@@ -186,7 +186,17 @@ def visualize_training_(gt_classes, loss, weights, input_images, storage):
 
     assert global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "L_BCAHW" or \
            global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "L_BAHW"
-    [N, _, _, _] = input_images.shape
+
+    def get_N_H_W(pred_class_logits):
+        H = []
+        W = []
+        for i in range(len(pred_class_logits)):
+            H.append(pred_class_logits[i].shape[2])
+            W.append(pred_class_logits[i].shape[3])
+        N = pred_class_logits[i].shape[0]
+        return N, H, W
+
+    N, H, W = get_N_H_W(loss)
 
     device = torch.device(global_cfg.MODEL.DEVICE)
     anchor_scales = len(global_cfg.MODEL.ANCHOR_GENERATOR.SIZES[0])
@@ -236,10 +246,10 @@ def visualize_training_(gt_classes, loss, weights, input_images, storage):
 
     from imbalancedetection.gambler_heads import reverse_list_N_A_K_H_W_to_NsumHWA_K_
     gt = reverse_list_N_A_K_H_W_to_NsumHWA_K_(gt_classes,
-                                              [80, 40, 20, 10, 5], #todo
+                                              global_cfg.MODEL.GAMBLER_HEAD.IN_LAYERS, #todo
                                               N,
-                                              [80, 40, 20, 10, 5],
-                                              [80, 40, 20, 10, 5],
+                                              H,
+                                              W,
                                               num_scale=anchor_scales,
                                               num_classes=1)
 
@@ -272,10 +282,10 @@ def visualize_training_(gt_classes, loss, weights, input_images, storage):
         num_classes = 1
 
     weights = reverse_list_N_A_K_H_W_to_NsumHWA_K_(weights,
-                                                   [80, 40, 20, 10, 5],#todo
+                                                   global_cfg.MODEL.GAMBLER_HEAD.IN_LAYERS,#todo
                                                    N,
-                                                   [80, 40, 20, 10, 5],
-                                                   [80, 40, 20, 10, 5],
+                                                   H,
+                                                   W,
                                                    num_scale=anchor_scales,
                                                    num_classes=num_classes)
     all_weights = []
@@ -328,7 +338,17 @@ def visualize_per_image(data, gt_classes, loss, weights, input_images, storage):
 
     assert global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "L_BCAHW" or \
            global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "L_BAHW"
-    [N, _, _, _] = input_images.shape
+
+    def get_N_H_W(pred_class_logits):
+        H = []
+        W = []
+        for i in range(len(pred_class_logits)):
+            H.append(pred_class_logits[i].shape[2])
+            W.append(pred_class_logits[i].shape[3])
+        N = pred_class_logits[i].shape[0]
+        return N, H, W
+
+    N, H, W = get_N_H_W(loss)
 
     device = torch.device(global_cfg.MODEL.DEVICE)
     anchor_scales = len(global_cfg.MODEL.ANCHOR_GENERATOR.SIZES[0])
@@ -372,10 +392,10 @@ def visualize_per_image(data, gt_classes, loss, weights, input_images, storage):
     all = []
     from imbalancedetection.gambler_heads import reverse_list_N_A_K_H_W_to_NsumHWA_K_
     gt = reverse_list_N_A_K_H_W_to_NsumHWA_K_(gt_classes,
-                                              [80, 40, 20, 10, 5],  # todo
+                                              global_cfg.MODEL.GAMBLER_HEAD.IN_LAYERS,  # todo
                                               N,
-                                              [80, 40, 20, 10, 5],
-                                              [80, 40, 20, 10, 5],
+                                              H,
+                                              W,
                                               num_scale=anchor_scales,
                                               num_classes=1)
 
@@ -385,10 +405,10 @@ def visualize_per_image(data, gt_classes, loss, weights, input_images, storage):
         num_classes = 1
 
     weights = reverse_list_N_A_K_H_W_to_NsumHWA_K_(weights,
-                                                   [80, 40, 20, 10, 5],  # todo
+                                                   global_cfg.MODEL.GAMBLER_HEAD.IN_LAYERS,  # todo
                                                    N,
-                                                   [80, 40, 20, 10, 5],
-                                                   [80, 40, 20, 10, 5],
+                                                   H,
+                                                   W,
                                                    num_scale=anchor_scales,
                                                    num_classes=num_classes)
 
@@ -1084,6 +1104,9 @@ class GANTrainer(TrainerBase):
             metrics_dict["loss_gambler"].backward()
             self.gambler_optimizer.step()
             self.iter_G += 1
+
+            del input_images, generated_output, gt_classes, weights, betting_map
+            torch.cuda.empty_cache()
             if self.iter_G == self.max_iter_gambler:
                 logger.info("Finished training Gambler")
 

@@ -338,8 +338,19 @@ class LayeredUnetGambler(GamblerHeads):
             weights: normalized betting map
         """
 
-        # todo function to get size of H & W from the predictions
-        [N, _, H, W] = pred_class_logits[0].shape
+        assert self.cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "L_BAHW", "does not support other shapes!"
+
+        def get_N_H_W(pred_class_logits):
+            H = []
+            W = []
+            for i in range(len(pred_class_logits)):
+                H.append(pred_class_logits[i].shape[2])
+                W.append(pred_class_logits[i].shape[3])
+            N = pred_class_logits[i].shape[0]
+            return N, H, W
+
+        [N, H, W] = get_N_H_W(pred_class_logits)
+
         if detach_pred is True:
             pred_class_logits = [p.detach() for p in pred_class_logits]
 
@@ -384,7 +395,6 @@ class LayeredUnetGambler(GamblerHeads):
         valid_loss = torch.zeros_like(cls_loss)
         valid_loss[valid_idxs, :] = cls_loss[valid_idxs, :]
 
-        #todo function to get size of H & W from the predictions
         normalize_w = self.cfg.MODEL.GAMBLER_HEAD.NORMALIZE
         if self.cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "B1HW":
             # gambler loss: ‌N,AK,H,W
@@ -430,8 +440,8 @@ class LayeredUnetGambler(GamblerHeads):
             cls_loss = reverse_list_N_A_K_H_W_to_NsumHWA_K_(valid_loss,
                                                             self.cfg.MODEL.GAMBLER_HEAD.IN_LAYERS,
                                                             N,
-                                                            [80, 40, 20, 10, 5],
-                                                            [80, 40, 20, 10, 5],
+                                                            H,
+                                                            W,
                                                             num_scale=len(self.cfg.MODEL.ANCHOR_GENERATOR.SIZES[0]),
                                                             num_classes=num_classes)
             # aggregate over classes

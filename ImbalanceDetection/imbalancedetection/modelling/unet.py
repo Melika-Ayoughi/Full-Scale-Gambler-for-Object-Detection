@@ -186,6 +186,12 @@ class DownCat(nn.Module):
     def forward(self, pred, x):
         out1 = self.maxpool(x)
         # print(f"prediction channels: {pred.shape} unet channels: {out1.shape}")
+        diffY = torch.tensor([pred.size()[2] - out1.size()[2]])
+        diffX = torch.tensor([pred.size()[3] - out1.size()[3]])
+
+        out1 = F.pad(out1, [diffX // 2, diffX - diffX // 2,
+                            diffY // 2, diffY - diffY // 2])
+        
         out2 = torch.cat([pred, out1], dim=1)
         return self.conv(out2)
 
