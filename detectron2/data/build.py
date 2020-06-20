@@ -186,7 +186,7 @@ def plot_instances_class_histogram(dataset_dicts, class_names):
     fig = plt.figure(figsize=(10, 8))
     plt.bar(bins, height=histogram[ind_sorted], color='#3DA4AB')
     plt.xticks(bins, np.array(class_names)[ind_sorted], rotation=90, fontsize=5)
-    plt.ylim(bottom=0, top=60)
+    # plt.ylim(bottom=0, top=100)
     # plt.yscale("log")
 
     fig.savefig(os.path.join(global_cfg.OUTPUT_DIR, "instance_class_histogram.pdf"))
