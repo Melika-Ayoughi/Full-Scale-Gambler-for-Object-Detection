@@ -32,7 +32,7 @@ def add_gambler_config(cfg):
     # Hyperparameter lambda that multiplies the regression loss
     _C.MODEL.GAMBLER_HEAD.REGRESSION_LAMBDA = 1
     # Hyperparameter lambda that multiplies the gambler loss from outside
-    _C.MODEL.GAMBLER_HEAD.GAMBLER_OUTSIDE_LAMBDA = 1
+    _C.MODEL.GAMBLER_HEAD.GAMBLER_OUTSIDE_LAMBDA = 1.0
     _C.MODEL.GAMBLER_HEAD.GAMBLER_TEMPERATURE = 0.03
     # classification loss used in the gambler can be either "sigmoid" or "focal"
     _C.MODEL.GAMBLER_HEAD.GAMBLER_LOSS_MODE = "focal"

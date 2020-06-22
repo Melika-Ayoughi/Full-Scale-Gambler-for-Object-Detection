@@ -17,8 +17,8 @@ MODEL:
     DETECTOR_ITERATIONS: 40
     GAMBLER_OUTPUT: "L_BAHW"
     GAMBLER_KAPPA: 1
-    GAMBLER_OUTSIDE_LAMBDA: 1
-    GAMBLER_TEMPERATURE: 0.01 #1e-20 epsilon is needed for divide by 0
+    GAMBLER_OUTSIDE_LAMBDA: 1.0
+    GAMBLER_TEMPERATURE: 0.1 #1e-20 epsilon is needed for divide by 0
     GAMBLER_LOSS_MODE: "sigmoid"
     DETECTOR_LOSS_MODE: "cls+reg-gambler"
     GAMBLER_OUT_CHANNELS: 3
@@ -42,4 +42,4 @@ DATASETS:
 #  TEST: ("coco_2017_train_100samples",)
   TRAIN: ("coco_2017_train",)
   TEST: ("coco_2017_val",)
-OUTPUT_DIR: "./output/gambler/2_full_coco/smoothing/temp001/"
+OUTPUT_DIR: "./output/gambler/2_full_coco/not_ignore_mid_ious"

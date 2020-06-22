@@ -12,6 +12,7 @@ MODEL:
   RETINANET:
     NUM_CLASSES: 80
     IN_FEATURES: ["p3", "p4", "p5", "p6", "p7"]
+    IOU_LABELS: [0, 1, 1] #consider unmatched into matched
 TEST:
   EVAL_PERIOD: 500 #500
 SOLVER:
