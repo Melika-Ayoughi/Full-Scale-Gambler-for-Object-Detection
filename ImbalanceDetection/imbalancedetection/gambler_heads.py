@@ -9,6 +9,7 @@ import os
 import numpy as np
 import torch.nn.functional as F
 from detectron2.layers import cat
+from detectron2.config import global_cfg
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +97,134 @@ def reverse_list_N_A_K_H_W_to_NsumHWA_K_(tensor, in_layers, N, H, W, num_scale=3
     return tensor_prime
 
 
+def calc_cls_loss(pred,
+                  gt_target,
+                  mode: str = "none",
+                  alpha: float = -1,
+                  gamma: float = 2,
+):
+
+    p = torch.sigmoid(pred)
+    ce_loss = F.binary_cross_entropy_with_logits(pred, gt_target, reduction="none")  # (N x R, K)
+    p_t = p * gt_target + (1 - p) * (1 - gt_target)
+
+    if mode == "focal":
+        cls_loss = ce_loss * ((1 - p_t) ** gamma)
+        if alpha >= 0:
+            alpha_t = alpha * gt_target + (1 - alpha) * (1 - gt_target)
+            cls_loss = alpha_t * cls_loss
+    elif mode == "sigmoid":
+        cls_loss = ce_loss
+        # if alpha >= 0:
+        #     alpha_t = alpha * gt_classes_target + (1 - alpha) * (1 - gt_classes_target)
+        #     cls_loss = alpha_t * cls_loss
+    else:
+        raise Exception("No mode it selected for the retinanet loss!!")
+
+    return cls_loss
+
+
+def calc_gambler_loss(valid_loss,
+                      weights,
+                      N,
+                      H,
+                      W,
+                      in_layers,
+                      gambler_heads,
+
+                      normalize_w: bool = True,
+                      num_classes: int = 80,
+                      gambler_output: str = "L_BAHW",
+                      gamma: float = 1.0):
+    """
+
+    Args:
+        cfg: config file
+        valid_loss: tensor, classification loss filtered only for valid classes (fg +‌bg)
+        weights: list(Tensor), betting map or output of the gambler
+        N: int, batch size
+        H: list(heights)
+        W: list (widths)
+
+    Returns:
+
+    """
+    if in_layers is None:
+        in_layers = [80, 40, 20, 10, 5]
+
+    if gambler_output == "B1HW":
+        # gambler loss: ‌N,AK,H,W
+        cls_loss = reverse_list_N_A_K_H_W_to_NsumHWA_K_(valid_loss, in_layers, N, H, W,
+                                                        num_classes)
+        # aggregate over classes and anchors
+        cls_loss = [torch.sum(l, dim=[1, 2])[:, None, :, :] for l in cls_loss]
+        NAKHW_loss = [l.clone().detach() for l in cls_loss]
+        cls_loss = list_N_AK_H_W_to_NsumHWA_K(cls_loss, num_classes=1)
+        weights = gambler_heads.permute_all_weights_to_N_HWA_K_and_concat(global_cfg, [weights], num_classes=1,
+                                                                          normalize_w=normalize_w)
+    elif gambler_output == "BCHW":
+        # gambler loss: ‌N,AK,H,W
+        cls_loss = reverse_list_N_A_K_H_W_to_NsumHWA_K_(valid_loss, in_layers, N, H, W,
+                                                        num_classes)
+        # aggregate over anchors
+        cls_loss = [torch.sum(l, dim=[1], keepdim=True) for l in cls_loss]
+        NAKHW_loss = [l.clone().detach() for l in cls_loss]
+        cls_loss = list_N_AK_H_W_to_NsumHWA_K(cls_loss, num_classes=num_classes)
+        weights = gambler_heads.permute_all_weights_to_N_HWA_K_and_concat(global_cfg, [weights], num_classes=num_classes,
+                                                                          normalize_w=normalize_w)
+    elif gambler_output == "BAHW":
+        # gambler loss: ‌N,AK,H,W
+        cls_loss = reverse_list_N_A_K_H_W_to_NsumHWA_K_(valid_loss, in_layers, N, H, W,
+                                                        num_classes)
+        # aggregate over classes
+        cls_loss = [torch.sum(l, dim=[2], keepdim=True) for l in cls_loss]
+        NAKHW_loss = [l.clone().detach() for l in cls_loss]
+        cls_loss = list_N_AK_H_W_to_NsumHWA_K(cls_loss, num_classes=1)
+        weights = gambler_heads.permute_all_weights_to_N_HWA_K_and_concat(global_cfg, [weights], num_classes=1,
+                                                                          normalize_w=normalize_w)
+    elif gambler_output == "BCAHW":
+        cls_loss = reverse_list_N_A_K_H_W_to_NsumHWA_K_(valid_loss, in_layers, N, H, W,
+                                                        num_classes)
+        NAKHW_loss = [l.clone().detach() for l in cls_loss]
+        cls_loss = list_N_AK_H_W_to_NsumHWA_K(cls_loss, num_classes=num_classes)
+    elif gambler_output == "L_BCAHW":
+        # gambler loss: ‌N,AK,H,W
+        cls_loss = reverse_list_N_A_K_H_W_to_NsumHWA_K_(valid_loss,
+                                                        in_layers,
+                                                        N,
+                                                        [80, 40, 20, 10, 5],
+                                                        [80, 40, 20, 10, 5],
+                                                        num_scale=len(global_cfg.MODEL.ANCHOR_GENERATOR.SIZES[0]),
+                                                        num_classes=num_classes)
+        NAKHW_loss = [l.clone().detach().data for l in cls_loss]
+        cls_loss = list_N_AK_H_W_to_NsumHWA_K(cls_loss, num_classes=num_classes)
+        weights = gambler_heads.permute_all_weights_to_N_HWA_K_and_concat_(global_cfg, weights, num_classes=num_classes,
+                                                                           normalize_w=normalize_w)
+    elif gambler_output == "L_BAHW":
+        cls_loss = reverse_list_N_A_K_H_W_to_NsumHWA_K_(valid_loss,
+                                                        in_layers,
+                                                        N,
+                                                        H,
+                                                        W,
+                                                        num_scale=len(global_cfg.MODEL.ANCHOR_GENERATOR.SIZES[0]),
+                                                        num_classes=num_classes)
+        # aggregate over classes
+        cls_loss = [torch.sum(l, dim=[2]) for l in cls_loss]
+        NAKHW_loss = [l.clone().detach() for l in cls_loss]
+        cls_loss = list_N_AK_H_W_to_NsumHWA_K(cls_loss, num_classes=1)
+        weights = gambler_heads.permute_all_weights_to_N_HWA_K_and_concat_(global_cfg, weights, num_classes=1,
+                                                                           normalize_w=normalize_w)
+
+    gambler_loss = -(weights ** gamma) * cls_loss
+    gambler_loss = gambler_loss.sum()
+
+    return gambler_loss, NAKHW_loss, weights
+
+
+calc_cls_loss_jit = torch.jit.script(calc_cls_loss)
+# calc_gambler_loss_jit = torch.jit.script(calc_gambler_loss)
+
+
 class GamblerHeads(torch.nn.Module):
     def __init__(self, cfg):
         super().__init__()
@@ -105,7 +234,8 @@ class GamblerHeads(torch.nn.Module):
         self.out_channels = cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUT_CHANNELS
         self.bilinear = cfg.MODEL.GAMBLER_HEAD.BILINEAR_UPSAMPLING
 
-    def permute_all_weights_to_N_HWA_K_and_concat(self, weights, num_classes=80, normalize_w=False):
+    @staticmethod
+    def permute_all_weights_to_N_HWA_K_and_concat(cfg, weights, num_classes=80, normalize_w=False):
         """
         Rearrange the tensor layout from the network output, i.e.:
         list[Tensor]: #lvl tensors of shape (N, A x K, Hi, Wi)
@@ -117,7 +247,7 @@ class GamblerHeads(torch.nn.Module):
         # all feature levels concatenated, so we keep the same representation
         # for the objectness and the box_delta
         weights_flattened = [N_AK_H_W_to_N_HWA_K(w, num_classes) for w in weights]  # Size=(N,HWA,K)
-        weights_flattened = [w + self.cfg.MODEL.GAMBLER_HEAD.GAMBLER_TEMPERATURE for w in weights_flattened]
+        weights_flattened = [w + cfg.MODEL.GAMBLER_HEAD.GAMBLER_TEMPERATURE for w in weights_flattened]
         if normalize_w is True:
             weights_flattened = [w / torch.sum(w, dim=[1, 2], keepdim=True) for w in weights_flattened]
         # concatenate on the first dimension (representing the feature levels), to
@@ -126,7 +256,8 @@ class GamblerHeads(torch.nn.Module):
         weights_flattened = cat(weights_flattened, dim=1).reshape(-1, num_classes)
         return weights_flattened
 
-    def permute_all_weights_to_N_HWA_K_and_concat_(self, weights, num_classes=80, normalize_w=False):
+    @staticmethod
+    def permute_all_weights_to_N_HWA_K_and_concat_(cfg, weights, num_classes=80, normalize_w=False):
         """
         Rearrange the tensor layout from the network output, i.e.:
         list[Tensor]: #lvl tensors of shape (N, A x K, Hi, Wi)
@@ -138,7 +269,7 @@ class GamblerHeads(torch.nn.Module):
         # all feature levels concatenated, so we keep the same representation
         # for the objectness and the box_delta
         weights_flattened = [N_AK_H_W_to_N_HWA_K(w, num_classes) for w in weights]  # Size=(N,HWA,K)
-        weights_flattened = [w + self.cfg.MODEL.GAMBLER_HEAD.GAMBLER_TEMPERATURE for w in weights_flattened]
+        weights_flattened = [w + cfg.MODEL.GAMBLER_HEAD.GAMBLER_TEMPERATURE for w in weights_flattened]
         if normalize_w is True:
             sum_all_layers = 0
             for w in weights_flattened:
@@ -267,6 +398,15 @@ class LayeredUnetGambler(GamblerHeads):
     def __init__(self, cfg):
         super().__init__(cfg)
 
+        self.mode = cfg.MODEL.GAMBLER_HEAD.GAMBLER_LOSS_MODE
+        self.alpha = cfg.MODEL.RETINANET.FOCAL_LOSS_ALPHA
+        self.focal_gamma = cfg.MODEL.RETINANET.FOCAL_LOSS_GAMMA
+
+        self.normalize_w = cfg.MODEL.GAMBLER_HEAD.NORMALIZE
+        self.gambler_output = cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT
+        self.in_layers = cfg.MODEL.GAMBLER_HEAD.IN_LAYERS
+        self.gamma = cfg.MODEL.GAMBLER_HEAD.GAMBLER_GAMMA
+
         image_mode = cfg.MODEL.GAMBLER_HEAD.IMAGE_MODE #conv or downsample
         self.image_channels = cfg.MODEL.GAMBLER_HEAD.IMAGE_CHANNELS
         g_in_channels = cfg.MODEL.GAMBLER_HEAD.FIXED_CHANNEL
@@ -369,113 +509,33 @@ class LayeredUnetGambler(GamblerHeads):
         gt_classes_target = torch.zeros_like(pred_class_logits)
         gt_classes_target[foreground_idxs, gt_classes[foreground_idxs]] = 1
 
-        p = torch.sigmoid(pred_class_logits)
-        ce_loss = F.binary_cross_entropy_with_logits(pred_class_logits, gt_classes_target, reduction="none") # (N x R, K)
-        p_t = p * gt_classes_target + (1 - p) * (1 - gt_classes_target)
-
-        mode = self.cfg.MODEL.GAMBLER_HEAD.GAMBLER_LOSS_MODE
-        alpha = self.cfg.MODEL.RETINANET.FOCAL_LOSS_ALPHA
-        gamma = self.cfg.MODEL.RETINANET.FOCAL_LOSS_GAMMA
-
-        if mode == "focal":
-            cls_loss = ce_loss * ((1 - p_t) ** gamma)
-            if alpha >= 0:
-                alpha_t = alpha * gt_classes_target + (1 - alpha) * (1 - gt_classes_target)
-                cls_loss = alpha_t * cls_loss
-        elif mode == "sigmoid":
-            cls_loss = ce_loss
-            # if alpha >= 0:
-            #     alpha_t = alpha * gt_classes_target + (1 - alpha) * (1 - gt_classes_target)
-            #     cls_loss = alpha_t * cls_loss
-        else:
-            logging.error("No mode it selected for the retinanet loss!!")
-            cls_loss = None
+        cls_loss = calc_cls_loss_jit(pred_class_logits, gt_classes_target, self.mode, self.alpha, self.focal_gamma)
 
         # ignore the invalid ids in loss
         valid_loss = torch.zeros_like(cls_loss)
         valid_loss[valid_idxs, :] = cls_loss[valid_idxs, :]
 
-        normalize_w = self.cfg.MODEL.GAMBLER_HEAD.NORMALIZE
-        if self.cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "B1HW":
-            # gambler loss: ‌N,AK,H,W
-            cls_loss = reverse_list_N_A_K_H_W_to_NsumHWA_K_(valid_loss, self.cfg.MODEL.GAMBLER_HEAD.IN_LAYERS, N, H, W, num_classes)
-            # aggregate over classes and anchors
-            cls_loss = [torch.sum(l, dim=[1, 2])[:, None, :, :] for l in cls_loss]
-            NAKHW_loss = [l.clone().detach() for l in cls_loss]
-            cls_loss = list_N_AK_H_W_to_NsumHWA_K(cls_loss, num_classes=1)
-            weights = self.permute_all_weights_to_N_HWA_K_and_concat([weights], num_classes=1, normalize_w=normalize_w)
-        elif self.cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "BCHW":
-            # gambler loss: ‌N,AK,H,W
-            cls_loss = reverse_list_N_A_K_H_W_to_NsumHWA_K_(valid_loss, self.cfg.MODEL.GAMBLER_HEAD.IN_LAYERS, N, H, W, num_classes)
-            # aggregate over anchors
-            cls_loss = [torch.sum(l, dim=[1], keepdim=True) for l in cls_loss]
-            NAKHW_loss = [l.clone().detach() for l in cls_loss]
-            cls_loss = list_N_AK_H_W_to_NsumHWA_K(cls_loss, num_classes=num_classes)
-            weights = self.permute_all_weights_to_N_HWA_K_and_concat([weights], num_classes=num_classes, normalize_w=normalize_w)
-        elif self.cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "BAHW":
-            # gambler loss: ‌N,AK,H,W
-            cls_loss = reverse_list_N_A_K_H_W_to_NsumHWA_K_(valid_loss, self.cfg.MODEL.GAMBLER_HEAD.IN_LAYERS, N, H, W, num_classes)
-            # aggregate over classes
-            cls_loss = [torch.sum(l, dim=[2], keepdim=True) for l in cls_loss]
-            NAKHW_loss = [l.clone().detach() for l in cls_loss]
-            cls_loss = list_N_AK_H_W_to_NsumHWA_K(cls_loss, num_classes=1)
-            weights = self.permute_all_weights_to_N_HWA_K_and_concat([weights], num_classes=1, normalize_w=normalize_w)
-        elif self.cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "BCAHW":
-            cls_loss = reverse_list_N_A_K_H_W_to_NsumHWA_K_(valid_loss, self.cfg.MODEL.GAMBLER_HEAD.IN_LAYERS, N, H, W, num_classes)
-            NAKHW_loss = [l.clone().detach() for l in cls_loss]
-            cls_loss = list_N_AK_H_W_to_NsumHWA_K(cls_loss, num_classes=num_classes)
-        elif self.cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "L_BCAHW":
-            # gambler loss: ‌N,AK,H,W
-            cls_loss = reverse_list_N_A_K_H_W_to_NsumHWA_K_(valid_loss,
-                                                            self.cfg.MODEL.GAMBLER_HEAD.IN_LAYERS,
-                                                            N,
-                                                            [80, 40, 20, 10, 5],
-                                                            [80, 40, 20, 10, 5],
-                                                            num_scale=len(self.cfg.MODEL.ANCHOR_GENERATOR.SIZES[0]),
-                                                            num_classes=num_classes)
-            NAKHW_loss = [l.clone().detach().data for l in cls_loss]
-            cls_loss = list_N_AK_H_W_to_NsumHWA_K(cls_loss, num_classes=num_classes)
-            weights = self.permute_all_weights_to_N_HWA_K_and_concat_(weights, num_classes=num_classes, normalize_w=normalize_w)
-        elif self.cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "L_BAHW":
-            cls_loss = reverse_list_N_A_K_H_W_to_NsumHWA_K_(valid_loss,
-                                                            self.cfg.MODEL.GAMBLER_HEAD.IN_LAYERS,
-                                                            N,
-                                                            H,
-                                                            W,
-                                                            num_scale=len(self.cfg.MODEL.ANCHOR_GENERATOR.SIZES[0]),
-                                                            num_classes=num_classes)
-            # aggregate over classes
-            cls_loss = [torch.sum(l, dim=[2]) for l in cls_loss]
-            NAKHW_loss = [l.clone().detach() for l in cls_loss]
-            cls_loss = list_N_AK_H_W_to_NsumHWA_K(cls_loss, num_classes=1)
-            weights = self.permute_all_weights_to_N_HWA_K_and_concat_(weights, num_classes=1, normalize_w=normalize_w)
+        gambler_heads = GamblerHeads(self.cfg)
+        gambler_loss, NAKHW_loss, weights = calc_gambler_loss(valid_loss,
+                                                              weights,
+                                                              N,
+                                                              H,
+                                                              W,
+                                                              self.in_layers,
+                                                              gambler_heads,
+                                                              normalize_w=self.normalize_w,
+                                                              num_classes=num_classes,
+                                                              gambler_output=self.gambler_output,
+                                                              gamma=self.gamma)
 
         storage = get_event_storage()
         storage.put_scalar("loss_gambler/lower_bound", -get_loss_upper_bound(NAKHW_loss, N))
-        # with open(os.path.join(self.cfg.OUTPUT_DIR, "weights‌.csv"), "a") as my_csv:
-        #     max_loss = []
-        #     max_weights = []
-        #     for i in range(N):
-        #         assert len(NAKHW_loss) == 1, "csv write does not work for full fpn layer!"
-        #         max_loss.append(NAKHW_loss[0][i, :, :, :].max().detach().cpu().numpy())
-        #         max_weights.append(weights[i, :, :, :].max().detach().cpu().numpy())
-        #         my_csv.write(
-        #             f"iteration: {str(storage.iter)}, image: {str(i)}, max weight: {max_weights[-1]},‌ max loss: {max_loss[-1]}, "
-        #             f"loss where weight is max: {NAKHW_loss[0][i, :, :, :].flatten()[weights[i, :, :, :].argmax()].item()}, weight where loss is max: {weights[i, :, :, :].flatten()[NAKHW_loss[0][i, :, :, :].argmax()].item()},"
-        #             f"weight argmax: {weights[i, :, :, :].argmax()}, loss argmax: {NAKHW_loss[0][i, :, :, :].argmax()}\n")
 
-        # storage.put_scalar("sum/max_loss", np.sum(np.array(max_loss)))  # sum over the batch
-        # storage.put_scalar("sum/max_weight", np.sum(np.array(max_weights)))  # sum over the batch
 
-        gambler_loss = -(weights ** self.cfg.MODEL.GAMBLER_HEAD.GAMBLER_GAMMA) * cls_loss
-        gambler_loss = gambler_loss.sum()
-
-        # with open(os.path.join(self.cfg.OUTPUT_DIR, "weights‌.csv"), "a") as my_csv:
-        #     my_csv.write(f"sum loss after weighting: {gambler_loss}\n")
-        if mode == "focal":
+        if self.mode == "focal":
             loss_before_weighting = [loss.sum() for loss in NAKHW_loss]
             loss_before_weighting = sum(loss_before_weighting) / max(1, num_foreground)
-        elif mode == "sigmoid":
+        elif self.mode == "sigmoid":
             loss_before_weighting = [loss.sum() for loss in NAKHW_loss]
             loss_before_weighting = sum(loss_before_weighting) / num_all_anchors
         else:
@@ -514,7 +574,6 @@ class LayeredUnetGambler(GamblerHeads):
             # concatenate along the channel
             gambler_input = torch.cat((input_images, scaled_prob), dim=1)  # (N,3+AK,H,W)
             return gambler_input, input_images
-
 
 @GAMBLER_HEAD_REGISTRY.register()
 class UnetLaurence(GamblerHeads):

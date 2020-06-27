@@ -66,7 +66,7 @@ def add_gambler_config(cfg):
     _C.MODEL.GAMBLER_HEAD.GAMBLER_GAMMA = 1
     # The period (in terms of steps) for minibatch visualization at train time.
     # Set to 0 to disable.
-    _C.MODEL.GAMBLER_HEAD.VIS_PERIOD = 300
+    _C.MODEL.GAMBLER_HEAD.VIS_PERIOD = 1000
     # initialize all these values to the default of the detector but can be changed later
     _C.MODEL.GAMBLER_HEAD.BASE_LR = cfg.SOLVER.BASE_LR
     _C.MODEL.GAMBLER_HEAD.BIAS_LR_FACTOR = cfg.SOLVER.BIAS_LR_FACTOR

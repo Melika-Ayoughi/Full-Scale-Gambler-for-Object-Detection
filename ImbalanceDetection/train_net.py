@@ -1105,7 +1105,7 @@ class GANTrainer(TrainerBase):
             self.gambler_optimizer.step()
             self.iter_G += 1
 
-            del input_images, generated_output, gt_classes, weights, betting_map
+            del data, input_images, generated_output, gt_classes, weights, betting_map
             torch.cuda.empty_cache()
             if self.iter_G == self.max_iter_gambler:
                 logger.info("Finished training Gambler")

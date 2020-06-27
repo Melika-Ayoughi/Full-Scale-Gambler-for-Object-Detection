@@ -160,7 +160,7 @@ def _quantize(x, bin_edges):
     return quantized
 
 
-def plot_instances_class_histogram(dataset_dicts, class_names):
+def plot_instances_class_histogram(dataset_dicts, class_names, name):
 
     import matplotlib.pyplot as plt
     from detectron2.config import global_cfg
@@ -178,8 +178,8 @@ def plot_instances_class_histogram(dataset_dicts, class_names):
         classes = [x["category_id"] for x in annos if not x.get("iscrowd", 0)]
         histogram += np.histogram(classes, bins=hist_bins)[0]
 
-    np.save(os.path.join(global_cfg.OUTPUT_DIR, 'histogram.npy'), histogram)
-    np.save(os.path.join(global_cfg.OUTPUT_DIR, 'class_names.npy'), class_names)
+    np.save(os.path.join(global_cfg.OUTPUT_DIR, f'histogram_{name}.npy'), histogram)
+    np.save(os.path.join(global_cfg.OUTPUT_DIR, f'class_names_{name}.npy'), class_names)
 
     ind_sorted = np.argsort(histogram)[::-1]
     bins = range(num_classes)
@@ -189,7 +189,7 @@ def plot_instances_class_histogram(dataset_dicts, class_names):
     # plt.ylim(bottom=0, top=100)
     # plt.yscale("log")
 
-    fig.savefig(os.path.join(global_cfg.OUTPUT_DIR, "instance_class_histogram.pdf"))
+    fig.savefig(os.path.join(global_cfg.OUTPUT_DIR, f"instance_class_histogram_{name}.pdf"))
     # storage = get_event_storage()
     # storage.put_fig("instance_class_histogram", fig)
     # plt.show()
@@ -322,7 +322,7 @@ def get_detection_dataset_dicts(
             class_names = MetadataCatalog.get(dataset_names[0]).thing_classes
             check_metadata_consistency("thing_classes", dataset_names)
             print_instances_class_histogram(dataset_dicts, class_names)
-            plot_instances_class_histogram(dataset_dicts, class_names)
+            plot_instances_class_histogram(dataset_dicts, class_names, dataset_name)
         except AttributeError:  # class names are not available for this dataset
             pass
     return dataset_dicts

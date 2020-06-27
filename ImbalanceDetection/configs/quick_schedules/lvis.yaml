@@ -1,5 +1,4 @@
 _BASE_: "./simple_retinanet.yaml"
-SEED: 57330821
 MODEL:
   WEIGHTS: "./output/retinanet_baselines/simple_retinanet/simple_retina_fulllvis/all_layers_3scales_lvis/model_0089999.pth"
   RETINANET:
@@ -10,12 +9,12 @@ MODEL:
     LOAD_PRETRAINED_GAMBLER: True
     WEIGHTS: "./output/gambler/sublvis/kappa1000000/model_0009999.pth" #the onlu pretrained model on gambler
     NAME: "LayeredUnetGambler"
-    GAMBLER_ITERATIONS: 200
-    DETECTOR_ITERATIONS: 400
+    GAMBLER_ITERATIONS: 0
+    DETECTOR_ITERATIONS: 40
     GAMBLER_OUTPUT: "L_BAHW" #"B1HW"
     GAMBLER_KAPPA: 1
-    GAMBLER_OUTSIDE_LAMBDA: 1
-    GAMBLER_TEMPERATURE: 0.01 #1e-20 epsilon is needed for divide by 0
+    GAMBLER_OUTSIDE_LAMBDA: 0.1
+    GAMBLER_TEMPERATURE: 0.1 #1e-20 epsilon is needed for divide by 0
     GAMBLER_LOSS_MODE: "sigmoid"
     DETECTOR_LOSS_MODE: "cls+reg-gambler"
     GAMBLER_OUT_CHANNELS: 3
@@ -35,9 +34,10 @@ MODEL:
 #    FIXED_CHANNEL: 64
 #    DATA_RANGE: [-0.5, 0.5]
 DATASETS:
-#  TRAIN: ("lvis_v0.5_train",)
-  TRAIN: ("lvis_v0.5_train_one_forth",)
+  TRAIN: ("lvis_v0.5_train",)
+#  TRAIN: ("lvis_v0.5_train_one_forth",)
   TEST: ("lvis_v0.5_val",)
 TEST:
+  EVAL_PERIOD: 1000
   DETECTIONS_PER_IMAGE: 300  # LVIS allows up to 300
-OUTPUT_DIR: "./output/gambler/2_full_lvis/first_train_both"
+OUTPUT_DIR: "./output/gambler/2_full_lvis/outside_lambda01_nounmatched"

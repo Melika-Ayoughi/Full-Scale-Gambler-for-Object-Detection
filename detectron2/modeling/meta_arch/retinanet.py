@@ -223,7 +223,7 @@ class RetinaNet(nn.Module):
         gt_classes_target[foreground_idxs, gt_classes[foreground_idxs]] = 1
 
         # logits loss
-        loss_cls = sigmoid_focal_loss(
+        loss_cls = sigmoid_focal_loss_jit(
             pred_class_logits[valid_idxs],
             gt_classes_target[valid_idxs],
             alpha=self.focal_loss_alpha,

@@ -273,7 +273,7 @@ class COCOEvaluator(DatasetEvaluator):
             ap = np.mean(precision) if precision.size else float("nan")
             results_per_category.append(("{}".format(name), float(ap * 100)))
 
-        histogram = np.load(os.path.join(global_cfg.OUTPUT_DIR, 'histogram.npy'))
+        histogram = np.load(os.path.join(global_cfg.OUTPUT_DIR, f'histogram_{global_cfg.DATASETS.TEST[0]}.npy'))
         ind_sorted = np.argsort(histogram)[::-1]
         a = np.array(results_per_category)[ind_sorted]
         bins = range(len(class_names))

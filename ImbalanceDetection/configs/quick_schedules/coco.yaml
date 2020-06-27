@@ -1,5 +1,4 @@
 _BASE_: "./simple_retinanet.yaml"
-SEED: 57330821
 MODEL:
 #  WEIGHTS: "./output/retinanet_baselines/simple_retinanet/simple_retina_overfit/all_layers_3scales/model_final.pth"
 #  WEIGHTS: "./output/retinanet_baselines/simple_retinanet/simple_retina_overfit/all_layers_3scales_sublvis/model_0050999.pth"
@@ -22,7 +21,7 @@ MODEL:
     GAMBLER_LOSS_MODE: "sigmoid"
     DETECTOR_LOSS_MODE: "cls+reg-gambler"
     GAMBLER_OUT_CHANNELS: 3
-    GAMBLER_IN_CHANNELS: 240 #240 or 3*1230 = 3690
+    GAMBLER_IN_CHANNELS: 240
     BASE_LR: 0.0001
     NORMALIZE: True
     BILINEAR_UPSAMPLING: False
@@ -36,10 +35,10 @@ MODEL:
 #    IMAGE_MODE: "conv"
 #    IMAGE_CHANNELS: 32
 #    FIXED_CHANNEL: 64
-    DATA_RANGE: [-11.11, 11.11] #random
+    DATA_RANGE: [-128, 128] #random
 DATASETS:
 #  TRAIN: ("coco_2017_train_100samples",)
 #  TEST: ("coco_2017_train_100samples",)
   TRAIN: ("coco_2017_train",)
   TEST: ("coco_2017_val",)
-OUTPUT_DIR: "./output/gambler/2_full_coco/not_ignore_mid_ious"
+OUTPUT_DIR: "./output/gambler/debug"
