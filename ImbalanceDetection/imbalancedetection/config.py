@@ -63,7 +63,7 @@ def add_gambler_config(cfg):
     # gambler optimizer: sgd or adam
     _C.MODEL.GAMBLER_HEAD.OPTIMIZER = "sgd"
     # bettingmap goes to the power of gamma to control focus on bets, if 0 -> normal bce loss
-    _C.MODEL.GAMBLER_HEAD.GAMBLER_GAMMA = 1
+    _C.MODEL.GAMBLER_HEAD.GAMBLER_GAMMA = 1.0
     # The period (in terms of steps) for minibatch visualization at train time.
     # Set to 0 to disable.
     _C.MODEL.GAMBLER_HEAD.VIS_PERIOD = 1000
