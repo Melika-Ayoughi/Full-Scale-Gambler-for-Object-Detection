@@ -338,29 +338,29 @@ class EvalHook(HookBase):
         self._period = eval_period
         self._func = eval_function
 
-    def before_train(self):
-        if self.trainer.iter == 0:
-            results = self._func()
-
-            if results:
-                assert isinstance(
-                    results, dict
-                ), "Eval function must return a dict. Got {} instead.".format(results)
-
-                flattened_results = flatten_results_dict(results)
-                for k, v in flattened_results.items():
-                    try:
-                        v = float(v)
-                    except Exception:
-                        raise ValueError(
-                            "[EvalHook] eval_function should return a nested dict of float. "
-                            "Got '{}: {}' instead.".format(k, v)
-                        )
-                self.trainer.storage.put_scalars(**flattened_results, smoothing_hint=False)
-
-            # Evaluation may take different time among workers.
-            # A barrier make them start the next iteration together.
-            comm.synchronize()
+    # def before_train(self):
+    #     if self.trainer.iter == 0:
+    #         results = self._func()
+    #
+    #         if results:
+    #             assert isinstance(
+    #                 results, dict
+    #             ), "Eval function must return a dict. Got {} instead.".format(results)
+    #
+    #             flattened_results = flatten_results_dict(results)
+    #             for k, v in flattened_results.items():
+    #                 try:
+    #                     v = float(v)
+    #                 except Exception:
+    #                     raise ValueError(
+    #                         "[EvalHook] eval_function should return a nested dict of float. "
+    #                         "Got '{}: {}' instead.".format(k, v)
+    #                     )
+    #             self.trainer.storage.put_scalars(**flattened_results, smoothing_hint=False)
+    #
+    #         # Evaluation may take different time among workers.
+    #         # A barrier make them start the next iteration together.
+    #         comm.synchronize()
 
     def after_step(self):
         next_iter = self.trainer.iter + 1

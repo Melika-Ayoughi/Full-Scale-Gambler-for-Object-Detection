@@ -9,13 +9,13 @@ MODEL:
     LOAD_PRETRAINED_GAMBLER: True
     WEIGHTS: "./output/gambler/sublvis/kappa1000000/model_0009999.pth" #the onlu pretrained model on gambler
     NAME: "LayeredUnetGambler"
-    GAMBLER_ITERATIONS: 0
+    GAMBLER_ITERATIONS: 20
     DETECTOR_ITERATIONS: 40
     GAMBLER_OUTPUT: "L_BAHW" #"B1HW"
     GAMBLER_KAPPA: 1
-    GAMBLER_OUTSIDE_LAMBDA: 0.1
+    GAMBLER_OUTSIDE_LAMBDA: 1.0
     GAMBLER_TEMPERATURE: 0.1 #1e-20 epsilon is needed for divide by 0
-    GAMBLER_LOSS_MODE: "sigmoid"
+    GAMBLER_LOSS_MODE: "focal"
     DETECTOR_LOSS_MODE: "cls+reg-gambler"
     GAMBLER_OUT_CHANNELS: 3
     GAMBLER_IN_CHANNELS: 3690 #3*1230
@@ -34,10 +34,14 @@ MODEL:
 #    FIXED_CHANNEL: 64
 #    DATA_RANGE: [-0.5, 0.5]
 DATASETS:
+  #  TRAIN: ("lvis_v0.5_train_one_forth",)
   TRAIN: ("lvis_v0.5_train",)
-#  TRAIN: ("lvis_v0.5_train_one_forth",)
   TEST: ("lvis_v0.5_val",)
 TEST:
-  EVAL_PERIOD: 1000
+  EVAL_PERIOD: 30000 #almost after every 4 epochs
   DETECTIONS_PER_IMAGE: 300  # LVIS allows up to 300
+SOLVER:
+  STEPS: (180000, 240000)
+  MAX_ITER: 270000
+  IMS_PER_BATCH: 8
 OUTPUT_DIR: "./output/gambler/2_full_lvis/outside_lambda01_nounmatched"
