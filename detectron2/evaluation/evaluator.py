@@ -13,6 +13,8 @@ from detectron2.config import global_cfg
 from detectron2.data import detection_utils as utils
 import tqdm
 import matplotlib.pyplot as plt
+from collections import defaultdict
+import copy
 
 class DatasetEvaluator:
     """
@@ -83,6 +85,48 @@ class DatasetEvaluators(DatasetEvaluator):
                     ), "Different evaluators produce results with the same key {}".format(k)
                     results[k] = v
         return results
+
+
+class Analyzer:
+    def __init__(self) -> None:
+        super().__init__()
+        self._imgid_to_pred = defaultdict(list)
+        self._imgid_to_AP = {}
+
+    def reset(self):
+        self._imgid_to_pred.clear()
+        self._imgid_to_AP.clear()
+
+    def find_ap_per_img(self, model, data_loader, evaluator):
+        num_devices = torch.distributed.get_world_size() if torch.distributed.is_initialized() else 1
+        total = len(data_loader)  # inference data loader must have a fixed length
+        evaluator.reset()
+
+        with inference_context(model), torch.no_grad():
+            for idx, inputs in enumerate(data_loader):
+                print(f"loading image{inputs[0]['file_name']}")
+                from detectron2.config import global_cfg
+                if global_cfg.MODEL.GAMBLER_ON is True:
+                    _, _, _, outputs = model(inputs)
+                else:
+                    outputs = model(inputs)
+                torch.cuda.synchronize()
+                evaluator.process(inputs, outputs)
+
+                res = evaluator.evaluate()
+                for prediction in evaluator._coco_results:
+                    self._imgid_to_pred[prediction["image_id"]].append(prediction)
+
+                self._imgid_to_AP[inputs[0]['image_id']] = res['bbox']['AP']
+                evaluator.reset()
+
+    @property
+    def imgid_to_pred(self):
+        return copy.deepcopy(self._imgid_to_pred)
+
+    @property
+    def imgid_to_AP(self):
+        return copy.deepcopy(self._imgid_to_AP)
 
 
 def inference_on_dataset(model, data_loader, evaluator):
@@ -168,7 +212,7 @@ def inference_on_dataset(model, data_loader, evaluator):
     return results
 
 
-def inference_and_visualize(detector, gambler, data_loader=None, mode="dataloader"):
+def visualize_inference(detector, gambler, data_loader=None, mode="dataloader"):
     """
     Run model on the data_loader and evaluate the metrics with evaluator.
     The model will be used in eval mode.
@@ -188,8 +232,7 @@ def inference_and_visualize(detector, gambler, data_loader=None, mode="dataloade
     Returns:
         The return value of `evaluator.evaluate()`
     """
-    import torch.nn.functional as F
-    from train_net import GANTrainer, visualize_training, visualize_training_
+    from train_net import visualize_training_, visualize_per_image
     import os
     from detectron2.utils.events import EventStorage
     from detectron2.utils.events import CommonMetricPrinter, JSONWriter, TensorboardXWriter
@@ -213,18 +256,21 @@ def inference_and_visualize(detector, gambler, data_loader=None, mode="dataloade
                 for idx, inputs in tqdm.tqdm(enumerate(data_loader)):
                     if idx > 3:
                         break
+
                     input_images, generated_output, gt_classes, loss_dict = detector(inputs)
-                    gambler_input, gambler_image = gambler.prepare_input_gambler(global_cfg, generated_output, input_images)
-                    betting_map = gambler(gambler_input, gambler_image)
+                    gambler_loss_dict, weights, betting_map = gambler(input_images,
+                                                                      generated_output['pred_class_logits'],
+                                                                      gt_classes,
+                                                                      detach_pred=True)  # (N,AK,H,W)
 
-                    loss_nakhw, loss_before_weighting, loss_gambler, weights = gambler.sigmoid_gambler_loss(
-                        generated_output['pred_class_logits'], betting_map, gt_classes,
-                        normalize_w=global_cfg.MODEL.GAMBLER_HEAD.NORMALIZE, detach_pred=True)
+                    visualize_per_image(inputs, gt_classes.clone().detach(), gambler_loss_dict["NAKHW_loss"],
+                                        weights, input_images, storage)
+                    visualize_training_(gt_classes.clone().detach(), gambler_loss_dict["NAKHW_loss"],
+                                        weights, input_images, storage)
 
-                    all_vis = visualize_training_(gt_classes, loss_nakhw, weights, input_images, storage)
-                    for i, vis in enumerate(all_vis):
-                        # save .png to get rid of jpeg artifacts
-                        output(vis, os.path.join(global_cfg.OUTPUT_DIR, "images", inputs[0]["file_name"].rsplit('/', 1)[1].split('.', 1)[0] + '_' + str(i) +'.png'))
+                    # for i, vis in enumerate(all_vis):
+                    #     # save .png to get rid of jpeg artifacts
+                    #     output(vis, os.path.join(global_cfg.OUTPUT_DIR, "images", inputs[0]["file_name"].rsplit('/', 1)[1].split('.', 1)[0] + '_' + str(i) +'.png'))
                     # for writer in periodic_writer._writers:
                     #     writer.write()
                     storage.step()
