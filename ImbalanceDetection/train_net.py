@@ -27,14 +27,14 @@ from detectron2.evaluation.evaluator import DatasetEvaluator, DatasetEvaluators
 from detectron2.evaluation import (
     DatasetEvaluator,
     inference_on_dataset,
-    inference_and_visualize,
+    visualize_inference,
     print_csv_format,
     verify_results,
 )
 from detectron2.evaluation.lvis_evaluation import LVISEvaluator
 from collections import OrderedDict
 from detectron2.utils.events import CommonMetricPrinter, JSONWriter, TensorboardXWriter
-from torchvision.utils import make_grid, save_image
+from torchvision.utils import make_grid
 import matplotlib.pyplot as plt
 from detectron2.utils.visualizer import Visualizer
 
@@ -201,6 +201,9 @@ def visualize_training_(gt_classes, loss, weights, input_images, storage):
     device = torch.device(global_cfg.MODEL.DEVICE)
     anchor_scales = len(global_cfg.MODEL.ANCHOR_GENERATOR.SIZES[0])
 
+    img_folder = os.path.join(global_cfg.OUTPUT_DIR, "images")
+    os.makedirs(img_folder, exist_ok=True)
+
     def output(vis, filepath):
         if global_cfg.MODEL.GAMBLER_HEAD.SAVE_VIS_FILES:
             print("Saving to {} ...".format(filepath))
@@ -224,7 +227,7 @@ def visualize_training_(gt_classes, loss, weights, input_images, storage):
                                    "epoch_" + str(storage.iter),
                                    "layer_" + str(i),
                                    "loss")
-        os.makedirs(loss_folder, exist_ok=True)
+        # os.makedirs(loss_folder, exist_ok=True)
 
         if global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT.find('C') != -1:  # If there is a C in it
             # loss_layer = torch.sum(loss_layer, dim=2)  # aggregate per class loss
@@ -240,7 +243,7 @@ def visualize_training_(gt_classes, loss, weights, input_images, storage):
             else:
                 all_loss[-1] = torch.cat((all_loss[-1], img_loss), dim=2)
             img_loss = img_loss.cpu().numpy().transpose(1, 2, 0)
-            output(img_loss, os.path.join(loss_folder, "scale_" + str(j) + '.png'))
+            # output(img_loss, os.path.join(loss_folder, "scale_" + str(j) + '.png'))
 
     # Prepare ground truth *********************************************************************************************
 
@@ -301,7 +304,7 @@ def visualize_training_(gt_classes, loss, weights, input_images, storage):
             # weight_layer = torch.sum(weight_layer, dim=2)  # aggregate per class weight
             weight_layer, _ = weight_layer.max(dim=2, keepdim=False)  # max over all classes at every location
         else:
-            weight_layer = torch.squeeze(weight_layer)
+            weight_layer = torch.squeeze(weight_layer, dim=2)
 
         weight_layer_for_vis = normalize_to_01(weight_layer)
         for j in range(anchor_scales):
@@ -316,7 +319,9 @@ def visualize_training_(gt_classes, loss, weights, input_images, storage):
             # output(img_weight, os.path.join(weights_folder, "scale_" + str(i) + '.png'))
 
     # tensorboard  **********************************************************************************************
-    for l_gt, l_loss, l_w in zip(all_gt, all_loss, all_weights):
+    for l, l_gt, l_loss, l_w in zip([*range(0, 5)], all_gt, all_loss, all_weights):
+        output(torch.cat((l_gt, l_loss, l_w), dim=1).permute(1, 2, 0).cpu().numpy(),
+               os.path.join(img_folder, f"iter{str(storage.iter)}_layer{str(l)}.png"))
         storage.put_image("all", torch.cat((l_gt, l_loss, l_w), dim=1))
     # bets_and_input = prepare_betting_map(normalize_to_01(betting_map), n, len(anchor_scales[0]), h, w,
     #                                      input_grid=input_grid, heatmap_mode=False)
@@ -353,6 +358,9 @@ def visualize_per_image(data, gt_classes, loss, weights, input_images, storage):
     device = torch.device(global_cfg.MODEL.DEVICE)
     anchor_scales = len(global_cfg.MODEL.ANCHOR_GENERATOR.SIZES[0])
 
+    img_folder = os.path.join(global_cfg.OUTPUT_DIR, "images")
+    os.makedirs(img_folder, exist_ok=True)
+
     def output(vis, filepath):
         if global_cfg.MODEL.GAMBLER_HEAD.SAVE_VIS_FILES:
             print("Saving to {} ...".format(filepath))
@@ -372,7 +380,6 @@ def visualize_per_image(data, gt_classes, loss, weights, input_images, storage):
         img = img.permute(1, 2, 0)
         if global_cfg.INPUT.FORMAT == "BGR":
             img = img[:, :, [2, 1, 0]]
-        # plt.imsave(os.path.join(global_cfg.OUTPUT_DIR, 'melika.png'), img.numpy() / 255.)
 
         metadata = MetadataCatalog.get(global_cfg.DATASETS.TRAIN[0])
         visualizer = Visualizer(img, metadata=metadata)
@@ -382,10 +389,8 @@ def visualize_per_image(data, gt_classes, loss, weights, input_images, storage):
             labels=labels,
             boxes=target_fields.get("gt_boxes", None),
         )
-        # vis.save(os.path.join(global_cfg.OUTPUT_DIR, 'ayoughi.png'))
+        output(vis.get_image(), os.path.join(img_folder, f"iter_{str(storage.iter)}_img_{i}.png"))
         storage.put_image(f"iter_{str(storage.iter)}_img_{i}", torch.from_numpy(vis.get_image()).permute(2, 0, 1))
-        # output(vis, str(per_image["image_id"]) + ".jpg")
-        # storage.put_image(f"iter_{str(storage.iter)}_img_{i}", img)
 
     # Prepare loss *****************************************************************************************************
 
@@ -431,7 +436,7 @@ def visualize_per_image(data, gt_classes, loss, weights, input_images, storage):
             # weight_layer = torch.sum(weight_layer, dim=2)  # aggregate per class weight
             weight_layer, _ = weight_layer.max(dim=2, keepdim=False)  # max over all classes at every location
         else:
-            weight_layer = torch.squeeze(weight_layer)
+            weight_layer = torch.squeeze(weight_layer, dim=2)
 
         weight_layer_for_vis = normalize_to_01(weight_layer)
 
@@ -443,6 +448,8 @@ def visualize_per_image(data, gt_classes, loss, weights, input_images, storage):
                 all.append(extend_to_rgb(gt_layer[i, k, :, :]))
                 all.append(extend_to_rgb(loss_layer[i, k, :, :]))
                 all.append(extend_to_rgb(weight_layer_for_vis[i, k, :, :]))
+                output(make_grid(all, nrow=3, pad_value=1).permute(1, 2, 0).cpu().numpy(),
+                       os.path.join(img_folder, f"iter_{str(storage.iter)}_img_{i}_layer{j}_scale{k}.png"))
                 storage.put_image(f"iter_{str(storage.iter)}_img_{i}_layer{j}_scale{k}", make_grid(all, nrow=3, pad_value=1))
                 all.clear()
 
@@ -772,7 +779,7 @@ class GANTrainer(TrainerBase):
                     )
                     results[dataset_name] = {}
                     continue
-            inference_and_visualize(detector, gambler, train_data_loader, mode)
+            visualize_inference(detector, gambler, train_data_loader, mode)
 
             from detectron2.utils.events import EventStorage
             with EventStorage(0) as storage:
