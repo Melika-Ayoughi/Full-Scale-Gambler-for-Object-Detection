@@ -106,17 +106,17 @@ def main(args):
         # train_data_loader = GANTrainer.build_train_loader(cfg)
 
         evaluator = GANTrainer.build_evaluator(cfg, dataset_name)
-        analyzer = Analyzer()
+        analyzer = Analyzer(args.output)
         # visualize_inference(detector, gambler, train_data_loader, args.source)
 
         with EventStorage(0) as storage:
             analyzer.find_ap_per_img(detector_ours, test_data_loader, evaluator)
             imgid_to_ap_ours, imgid_to_pred_ours = analyzer.imgid_to_AP, analyzer.imgid_to_pred
-            analyzer.reset()
+            analyzer.save()
 
             analyzer.find_ap_per_img(detector_baseline, test_data_loader, evaluator)
             imgid_to_ap_base, imgid_to_pred_base = analyzer.imgid_to_AP, analyzer.imgid_to_pred
-            analyzer.reset()
+            analyzer.save()
 
             imgid_to_topk_APs = get_topk_different_imgs(imgid_to_ap_ours, imgid_to_ap_base, k=args.k, order=args.sort)
 

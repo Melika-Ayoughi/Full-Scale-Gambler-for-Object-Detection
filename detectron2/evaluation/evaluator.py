@@ -15,6 +15,9 @@ import tqdm
 import matplotlib.pyplot as plt
 from collections import defaultdict
 import copy
+import os
+import json
+from pathlib import Path
 
 class DatasetEvaluator:
     """
@@ -88,14 +91,29 @@ class DatasetEvaluators(DatasetEvaluator):
 
 
 class Analyzer:
-    def __init__(self) -> None:
+    def __init__(self, output_dir) -> None:
         super().__init__()
         self._imgid_to_pred = defaultdict(list)
         self._imgid_to_AP = {}
+        self._output_dir = Path(output_dir)
 
     def reset(self):
         self._imgid_to_pred.clear()
         self._imgid_to_AP.clear()
+
+    def save(self):
+        os.makedirs(self._output_dir, exist_ok=True)
+        file_path = self._output_dir / "imgid_to_predictions.json"
+        with file_path.open("w") as f:
+            json.dump(self._imgid_to_pred, f, indent=2)
+
+        file_path = self._output_dir / "imgid_to_AP.json"
+        with file_path.open("w") as f:
+            json.dump(self._imgid_to_AP, f, indent=2)
+
+        # with PathManager.open(file_path, "r") as f:
+        #     predictions = json.load(f)
+        self.reset()
 
     def find_ap_per_img(self, model, data_loader, evaluator):
         num_devices = torch.distributed.get_world_size() if torch.distributed.is_initialized() else 1
