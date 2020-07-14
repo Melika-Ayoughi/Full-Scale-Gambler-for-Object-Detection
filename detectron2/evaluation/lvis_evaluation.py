@@ -16,7 +16,7 @@ from detectron2.utils.logger import create_small_table
 
 from .coco_evaluation import instances_to_coco_json
 from .evaluator import DatasetEvaluator
-
+import numpy as np
 
 class LVISEvaluator(DatasetEvaluator):
     """
@@ -83,6 +83,34 @@ class LVISEvaluator(DatasetEvaluator):
             if "proposals" in output:
                 prediction["proposals"] = output["proposals"].to(self._cpu_device)
             self._predictions.append(prediction)
+
+    def evaluate_from_file(self):
+        # file_path = os.path.join(self._output_dir, "instances_predictions.pth")
+        # with PathManager.open(file_path, "rb") as f:
+        #     self._predictions = torch.load(f)
+        #
+        # if len(self._predictions) == 0:
+        #     self._logger.warning("[LVISEvaluator] Did not receive valid predictions.")
+        #     return {}
+
+        self._results = OrderedDict()
+
+        file_path = os.path.join(self._output_dir, "lvis_instances_results.json")
+        self._logger.info("Loading results from {}".format(file_path))
+        with PathManager.open(file_path, "r") as f:
+            self._lvis_results = json.load(f)
+
+        self._logger.info("Evaluating predictions ...")
+        for task in sorted(self._tasks):
+            res = _evaluate_predictions_on_lvis_per_class(
+                self._lvis_api,
+                self._lvis_results,
+                task,
+                class_names=self._metadata.get("thing_classes"),
+            )
+            self._results[task] = res
+
+        return copy.deepcopy(self._results)
 
     def evaluate(self):
         if self._distributed:
@@ -337,4 +365,64 @@ def _evaluate_predictions_on_lvis(lvis_gt, lvis_results, iou_type, class_names=N
     results = lvis_eval.get_results()
     results = {metric: float(results[metric] * 100) for metric in metrics}
     logger.info("Evaluation results for {}: \n".format(iou_type) + create_small_table(results))
+    return results
+
+
+def _evaluate_predictions_on_lvis_per_class(lvis_gt, lvis_results, iou_type, class_names=None):
+    """
+        Args:
+            iou_type (str):
+            kpt_oks_sigmas (list[float]):
+            class_names (None or list[str]): if provided, will use it to predict
+                per-category AP.
+
+        Returns:
+            a dict of {metric name: score}
+        """
+    metrics = {
+        "bbox": ["AP", "AP50", "AP75", "APs", "APm", "APl", "APr", "APc", "APf"],
+        "segm": ["AP", "AP50", "AP75", "APs", "APm", "APl", "APr", "APc", "APf"],
+    }[iou_type]
+
+    logger = logging.getLogger(__name__)
+
+    if len(lvis_results) == 0:  # TODO: check if needed
+        logger.warn("No predictions from the model! Set scores to -1")
+        return {metric: -1 for metric in metrics}
+
+    if iou_type == "segm":
+        lvis_results = copy.deepcopy(lvis_results)
+        # When evaluating mask AP, if the results contain bbox, LVIS API will
+        # use the box area as the area of the instance, instead of the mask area.
+        # This leads to a different definition of small/medium/large.
+        # We remove the bbox field to let mask AP use mask area.
+        for c in lvis_results:
+            c.pop("bbox", None)
+
+    from lvis import LVISEval, LVISResults
+
+    lvis_results = LVISResults(lvis_gt, lvis_results)
+    lvis_eval = LVISEval(lvis_gt, lvis_results, iou_type)
+
+    lvis_eval.evaluate()
+    lvis_eval.accumulate()
+    precisions = lvis_eval.eval["precision"]
+
+    results_per_category = []
+    for idx, name in enumerate(class_names):
+        # area range index 0: all area ranges
+        # max dets index -1: typically 100 per image
+        precision = precisions[:, :, idx, 0]
+        precision = precision[precision > -1]
+        ap = np.mean(precision) if precision.size else float("nan")
+        results_per_category.append(("{}".format(name), float(ap * 100)))
+
+    lvis_eval.summarize()
+    lvis_eval.print_results()
+
+    # Pull the standard metrics from the LVIS results
+    results = lvis_eval.get_results()
+    results = {metric: float(results[metric] * 100) for metric in metrics}
+    logger.info("Evaluation results for {}: \n".format(iou_type) + create_small_table(results))
+    results.update({"AP-" + name: ap for name, ap in results_per_category})
     return results

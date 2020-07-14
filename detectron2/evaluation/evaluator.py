@@ -230,6 +230,40 @@ def inference_on_dataset(model, data_loader, evaluator):
     return results
 
 
+def load_old_inference_results(data_loader, evaluator):
+    """
+    Run model on the data_loader and evaluate the metrics with evaluator.
+    The model will be used in eval mode.
+
+    Args:
+        model (nn.Module): a module which accepts an object from
+            `data_loader` and returns some outputs. It will be temporarily set to `eval` mode.
+
+            If you wish to evaluate a model in `training` mode instead, you can
+            wrap the given model and override its behavior of `.eval()` and `.train()`.
+        data_loader: an iterable object with a length.
+            The elements it generates will be the inputs to the model.
+        evaluator (DatasetEvaluator): the evaluator to run. Use
+            :class:`DatasetEvaluators([])` if you only want to benchmark, but
+            don't want to do any evaluation.
+
+    Returns:
+        The return value of `evaluator.evaluate()`
+    """
+    logger = logging.getLogger(__name__)
+    logger.info("Start inference on {} images".format(len(data_loader)))
+
+    evaluator.reset()
+    #instad of process: evaluator.process(inputs, outputs), load predictions from files
+
+    results = evaluator.evaluate_from_file()
+    # An evaluator may return None when not in main process.
+    # Replace it by an empty dict instead to make it easier for downstream code to handle
+    if results is None:
+        results = {}
+    return results
+
+
 def visualize_inference(detector, gambler, data_loader=None, mode="dataloader"):
     """
     Run model on the data_loader and evaluate the metrics with evaluator.

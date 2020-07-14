@@ -108,6 +108,42 @@ class COCOEvaluator(DatasetEvaluator):
                 prediction["proposals"] = output["proposals"].to(self._cpu_device)
             self._predictions.append(prediction)
 
+    def evaluate_from_file(self):
+        # file_path = os.path.join(self._output_dir, "instances_predictions.pth")
+        # with PathManager.open(file_path, "rb") as f:
+        #     self._predictions = torch.load(f)
+        #
+        # if len(self._predictions) == 0:
+        #     self._logger.warning("[COCOEvaluator] Did not receive valid predictions.")
+        #     return {}
+
+        self._results = OrderedDict()
+
+        file_path = os.path.join(self._output_dir, "coco_instances_results.json")
+        self._logger.info("Loading results from {}".format(file_path))
+        with PathManager.open(file_path, "r") as f:
+            self._coco_results = json.load(f)
+
+        if not self._do_evaluation:
+            self._logger.info("Annotations are not available for evaluation.")
+            return
+
+        self._logger.info("Evaluating predictions ...")
+        for task in sorted(self._tasks):
+            coco_eval = (
+                _evaluate_predictions_on_coco(
+                    self._coco_api, self._coco_results, task, kpt_oks_sigmas=self._kpt_oks_sigmas
+                )
+                if len(self._coco_results) > 0
+                else None  # cocoapi does not handle empty results very well
+            )
+
+            res = self._derive_coco_results(
+                coco_eval, task, class_names=self._metadata.get("thing_classes")
+            )
+            self._results[task] = res
+            return copy.deepcopy(self._results)
+
     def evaluate(self):
         if self._distributed:
             comm.synchronize()
