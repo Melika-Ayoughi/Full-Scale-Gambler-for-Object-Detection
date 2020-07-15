@@ -25,7 +25,10 @@ from itertools import islice
 import matplotlib.pyplot as plt
 from fvcore.common.file_io import PathManager
 import json
-
+import math
+import copy
+from collections import defaultdict
+import statistics
 
 def create_instances(predictions, image_size):
     ret = Instances(image_size)
@@ -93,8 +96,6 @@ def plot_aps(cfg, args, ours, baseline, sort="frequency"):
         ind_sorted = list(range(extra)) + list(ind_sorted + extra)
 
     elif sort == "size":
-        from collections import defaultdict
-        import statistics
         catid_to_abs_areas = defaultdict(list)
         catid_to_rel_areas = defaultdict(list)
         train_data = list(DatasetCatalog.get(cfg.DATASETS.TRAIN[0]))
@@ -119,7 +120,6 @@ def plot_aps(cfg, args, ours, baseline, sort="frequency"):
         ind_sorted = list(range(extra)) + list(ind_sorted + extra)
 
     elif sort == "ap":
-        import copy
         cat_to_ap_base = copy.deepcopy(catname_to_ap_baseline)
 
         ind = 0
@@ -128,16 +128,15 @@ def plot_aps(cfg, args, ours, baseline, sort="frequency"):
             if not catname.startswith("AP"):
                 catid_to_ap_base[ind] = -ap
                 ind += 1
-
-        sorted_catid_to_ap_base = {k: v for k, v in sorted(catid_to_ap_base.items(), key=lambda item: item[1], reverse=True)}
+        
+        sorted_catid_to_ap_base = {k: v for k, v in sorted(catid_to_ap_base.items(), key=lambda item: float('-inf') if math.isnan(item[1]) else item[1], reverse=True)}
         extra = len(catname_to_ap) - cfg.MODEL.RETINANET.NUM_CLASSES
         ind_sorted = np.asarray(list(sorted_catid_to_ap_base))
         ind_sorted = list(range(extra)) + list(ind_sorted + extra)
 
     elif sort == "class_entropy":
-        from collections import defaultdict
 
-        catid_to_countinstances = dict.fromkeys(range(80),0)
+        catid_to_countinstances = dict.fromkeys(range(cfg.MODEL.RETINANET.NUM_CLASSES),0)
         catid_to_imgs = defaultdict(set)
         train_data = list(DatasetCatalog.get(cfg.DATASETS.TRAIN[0]))
         for img in train_data:
@@ -155,7 +154,7 @@ def plot_aps(cfg, args, ours, baseline, sort="frequency"):
     else:
         ind_sorted = list(range(len(catname_to_ap)))
 
-    fig = plt.figure(figsize=(15, 8))
+    fig = plt.figure(figsize=(30, 8))
     plt.bar(range(len(catname_to_ap)), width=0.5, height=np.array(list(catname_to_ap.values()))[ind_sorted],
             color='#3DA4AB')
     plt.bar(range(len(catname_to_ap_baseline)), width=0.5, height=np.array(list(catname_to_ap_baseline.values()))[ind_sorted], color='red')
@@ -163,7 +162,7 @@ def plot_aps(cfg, args, ours, baseline, sort="frequency"):
     fig.savefig(os.path.join(args.output, f"by{sort}_ap_compare_{args.dir_ours.split('/')[-2]}_{args.dir_baseline.split('/')[-2]}.png"))
     plt.close()
 
-    fig = plt.figure(figsize=(15, 8))
+    fig = plt.figure(figsize=(30, 8))
     catname_to_ap_diffs = {name: (catname_to_ap[name] + catname_to_ap_baseline[name]) for (name, ap) in
                            catname_to_ap.items()}
     plt.bar(range(len(catname_to_ap)), width=0.5, height=np.array(list(catname_to_ap_diffs.values()))[ind_sorted], color='green')  # alpha=0.3
