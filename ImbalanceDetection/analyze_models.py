@@ -66,7 +66,7 @@ def get_topk_different_imgs(imgid_to_ap_ours, imgid_to_ap_base, k, order="desc")
     return dict(islice(sorted_imgid_to_diff_aps.items(), k))
 
 
-def plot_aps(cfg, args, ours, basline, sort="frequency"):
+def plot_aps(cfg, args, ours, baseline, sort="frequency"):
 
     catname_to_ap = {}
     for (name, ap) in ours['bbox'].items():
@@ -77,7 +77,7 @@ def plot_aps(cfg, args, ours, basline, sort="frequency"):
             catname_to_ap[name] = ap
 
     catname_to_ap_baseline = {}
-    for (name, ap) in basline['bbox'].items():
+    for (name, ap) in baseline['bbox'].items():
         # print(f"name:{name}:ap:{ap}")
         if name.startswith("AP-"):
             catname_to_ap_baseline[name.strip("AP-")] = -ap
@@ -91,6 +91,7 @@ def plot_aps(cfg, args, ours, basline, sort="frequency"):
         extra = len(catname_to_ap) - cfg.MODEL.RETINANET.NUM_CLASSES
         # shift the original ind_sorted by extra indices and add them in the beginning
         ind_sorted = list(range(extra)) + list(ind_sorted + extra)
+
     elif sort == "size":
         from collections import defaultdict
         import statistics
@@ -115,6 +116,40 @@ def plot_aps(cfg, args, ours, basline, sort="frequency"):
         extra = len(catname_to_ap) - cfg.MODEL.RETINANET.NUM_CLASSES
 
         ind_sorted = np.asarray(list(sorted_catid_to_rel_area))
+        ind_sorted = list(range(extra)) + list(ind_sorted + extra)
+
+    elif sort == "ap":
+        import copy
+        cat_to_ap_base = copy.deepcopy(catname_to_ap_baseline)
+
+        ind = 0
+        catid_to_ap_base = {}
+        for (catname, ap) in cat_to_ap_base.items():
+            if not catname.startswith("AP"):
+                catid_to_ap_base[ind] = -ap
+                ind += 1
+
+        sorted_catid_to_ap_base = {k: v for k, v in sorted(catid_to_ap_base.items(), key=lambda item: item[1], reverse=True)}
+        extra = len(catname_to_ap) - cfg.MODEL.RETINANET.NUM_CLASSES
+        ind_sorted = np.asarray(list(sorted_catid_to_ap_base))
+        ind_sorted = list(range(extra)) + list(ind_sorted + extra)
+
+    elif sort == "class_entropy":
+        from collections import defaultdict
+
+        catid_to_countinstances = dict.fromkeys(range(80),0)
+        catid_to_imgs = defaultdict(set)
+        train_data = list(DatasetCatalog.get(cfg.DATASETS.TRAIN[0]))
+        for img in train_data:
+            for ann in img['annotations']:
+                catid_to_countinstances[ann['category_id']] += 1
+                catid_to_imgs[ann['category_id']].add(img['image_id'])
+
+        catid_to_entropies = {catid: count/len(catid_to_imgs[catid]) for (catid, count) in catid_to_countinstances.items()}
+        sorted_catid_to_entropies = {k: v for k, v in sorted(catid_to_entropies.items(), key=lambda item: item[1], reverse=True)}
+
+        extra = len(catname_to_ap) - cfg.MODEL.RETINANET.NUM_CLASSES
+        ind_sorted = np.asarray(list(sorted_catid_to_entropies))
         ind_sorted = list(range(extra)) + list(ind_sorted + extra)
 
     else:
@@ -184,7 +219,54 @@ def main(args):
         # visualize_inference(detector, gambler, train_data_loader, args.source)
 
         if args.per_image_ap:
-            
+            # import json
+            # file_path = os.path.join("./output/gambler/2_full_coco/smoothing/fromscratch/focal_noimage/inference",
+            #                          "coco_instances_results_mine.json")
+            # with PathManager.open(file_path, "r") as f:
+            #     imgid_to_pred_ours = json.load(f)
+            #
+            # from collections import defaultdict
+            # _imgid_to_pred = defaultdict(list)
+            # for prediction in imgid_to_pred_ours:
+            #     _imgid_to_pred[prediction["image_id"]].append(prediction)
+            # imgid_to_pred_ours = _imgid_to_pred
+            #
+            # file_path = os.path.join(
+            #     "./output/retinanet_baselines/simple_retinanet/simple_retina_fullcoco/all_layers_3scales/inference",
+            #     "coco_instances_results.json")
+            # with PathManager.open(file_path, "r") as f:
+            #     imgid_to_pred_base = json.load(f)
+            #
+            # from collections import defaultdict
+            # _imgid_to_pred_base = defaultdict(list)
+            # for prediction in imgid_to_pred_base:
+            #     _imgid_to_pred_base[prediction["image_id"]].append(prediction)
+            # imgid_to_pred_base = _imgid_to_pred_base
+            #
+            # # imgid_to_topk_APs={k: v for k, v in sorted(imgid_to_topk_APs.items(), key=lambda item: item[1])}
+            # args.conf_threshold = 0.2
+            # a = dict(islice(imgid_to_topk_APs.items(), 200))
+            #
+            # for dic in tqdm.tqdm(dicts):
+            #     if dic["image_id"] in a.keys():
+            #         img = cv2.imread(dic["file_name"], cv2.IMREAD_COLOR)[:, :, ::-1]
+            #         basename = os.path.basename(dic["file_name"])
+            #         predictions_ours = create_instances(imgid_to_pred_ours[dic["image_id"]], img.shape[:2])
+            #         # predictions_ours.remove("pred_masks")
+            #         vis = Visualizer(img, metadata)
+            #         vis_pred = vis.draw_instance_predictions(predictions_ours).get_image()
+            #
+            #         vis = Visualizer(img, metadata)
+            #         vis_gt = vis.draw_dataset_dict(dic).get_image()
+            #
+            #         predictions_base = create_instances(imgid_to_pred_base[dic["image_id"]], img.shape[:2])
+            #         # predictions_base.remove("pred_masks")
+            #         vis = Visualizer(img, metadata)
+            #         vis_pred_baseline = vis.draw_instance_predictions(predictions_base).get_image()
+            #
+            #         concat = np.concatenate((vis_pred, vis_pred_baseline, vis_gt), axis=1)
+            #         cv2.imwrite(os.path.join(args.output, basename), concat[:, :, ::-1])
+
             with EventStorage(0) as storage:
                 analyzer.find_ap_per_img(detector_ours, test_data_loader, evaluator_ours)
                 imgid_to_ap_ours, imgid_to_pred_ours = analyzer.imgid_to_AP, analyzer.imgid_to_pred
@@ -194,11 +276,11 @@ def main(args):
                 imgid_to_ap_base, imgid_to_pred_base = analyzer.imgid_to_AP, analyzer.imgid_to_pred
                 analyzer.save()
     
-                imgid_to_topk_APs = get_topk_different_imgs(imgid_to_ap_ours, imgid_to_ap_base, k=args.k, order=args.sort)
+                imgid_to_topk_APs = get_topk_different_imgs(imgid_to_ap_ours, imgid_to_ap_base, k=args.k, order=args.sort_order)
     
-                if args.sort == "desc":
+                if args.sort_order == "desc":
                     logger.info(f"The topk most different APs where our model outperformed")
-                elif args.sort == "asc":
+                elif args.sort_order == "asc":
                     logger.info(f"The topk most different APs where baseline outperformed")
     
                 for dic in tqdm.tqdm(dicts):
@@ -242,7 +324,7 @@ def main(args):
 
 
 
-            plot_aps(cfg, args, results_ours, results_baseline, sort="size")
+            plot_aps(cfg, args, results_ours, results_baseline, sort=args.sort)
     
             # results_ours_dict = OrderedDict()
             # results_baseline_dict = OrderedDict()
@@ -260,13 +342,13 @@ if __name__ == "__main__":
     parser.add_argument("--output", required=True, help="output directory")
     parser.add_argument("--dataset", help="name of the dataset", default="coco_2017_val")
     parser.add_argument("--conf-threshold", default=0.5, type=float, help="confidence threshold")
-    parser.add_argument("--sort", default="desc", type=str, help="if desc: best of our model, asc: best of baseline")
+    parser.add_argument("--sort-order", default="desc", type=str, help="if desc: best of our model, asc: best of baseline")
     parser.add_argument("--k", default=100, type=int, help="top k results")
     parser.add_argument("--per-image-ap", action="store_true", help="if present: finds the most different images")
     parser.add_argument("--compare-aps", action="store_true", help="if present: draws the diagram of difference of ap")
     parser.add_argument("--dir-ours", required=True, help="input directory of our model")
     parser.add_argument("--dir-baseline", required=True, help="input directory of baseline model")
-
+    parser.add_argument("--sort", default="frequency", type=str, help="frequency, size, ap, class_entropy")
     args = parser.parse_args()
 
     metadata = MetadataCatalog.get(args.dataset)
