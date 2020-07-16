@@ -455,7 +455,7 @@ def _search_dict_by_id(_dict, ids):
     return [_dict[id] for id in ids]
 
 
-def build_toy_dataset_coco(json_input="instances_train2017", json_output="instances_train2017_100samples", sampling_rate=(1/1200)):
+def build_toy_dataset_coco(json_input="instances_train2017", json_output="instances_train2017_20percent", sampling_rate=(20/100)):
     """
         Build a sampled version of COCO dataset for shorter training time.
 
@@ -478,7 +478,7 @@ def build_toy_dataset_coco(json_input="instances_train2017", json_output="instan
     annFile_input = './datasets/coco/annotations/{}.json'.format(json_input)
     annFile_output = './datasets/coco/annotations/{}.json'.format(json_output)
 
-    # initialize LVIS api for instance annotations
+    # initialize COCO api for instance annotations
     coco = COCO(annFile_input)
 
     # copy categories, info and licences from the original dataset
@@ -506,5 +506,62 @@ def build_toy_dataset_coco(json_input="instances_train2017", json_output="instan
         json.dump(data, outfile, indent=4)
 
 
+def build_noisy_label_dataset_coco(json_input="instances_train2017", json_output="instances_train2017_20noise_uniform",
+                                   noise_probability=(20/100), class_distribution="uniform"):
+    """
+        Build a sampled version of COCO dataset for shorter training time.
+
+        Args:
+            json_input (str): full path to the COCO json annotation file.
+            json_output (str): full path to the save location of new json file.
+            sampling_rate (int): if sampling rate = 1/4, 1/4th of images are saved in json_output.
+
+        """
+    from pycocotools.coco import COCO
+    import json
+    import numpy as np
+    import os
+    from detectron2.utils.logger import setup_logger
+
+    logger = setup_logger(name=__name__)
+
+    cwd = os.getcwd()
+    logger.info("Starting to build the sampled COCO dataset, starting from {}".format(cwd))
+    annFile_input = './datasets/coco/annotations/{}.json'.format(json_input)
+    annFile_output = './datasets/coco/annotations/{}.json'.format(json_output)
+
+    # initialize COCO api for instance annotations
+    coco = COCO(annFile_input)
+
+    # copy categories, info and licences from the original dataset
+    data = {"info": coco.dataset["info"], "images": coco.dataset["images"], "annotations": [],
+            "categories": coco.dataset["categories"], "licenses": coco.dataset["licenses"]}
+
+
+    logger.info("before noisifying annotations")
+    cat_mapping = [catid for catid in coco.cats.keys()]
+    num_classes = len(coco.cats.keys())
+
+    if class_distribution == "uniform":
+        p_perclass = num_classes * [1/num_classes]
+    elif class_distribution == "frequency":
+        p_perclass = []
+        raise Exception("by frequency not yet implemented")
+    else:
+        raise Exception("There is no else")
+
+    data["annotations"] = []
+    for ann in coco.dataset['annotations']:
+        if np.random.uniform() < noise_probability:
+            ind_newcat = int(np.random.choice(num_classes, 1, p=p_perclass))
+            ann['category_id'] = cat_mapping[ind_newcat]
+        data["annotations"].append(ann)
+
+    logger.info("before writing into the file")
+    with open(annFile_output, 'w') as outfile:
+        json.dump(data, outfile, indent=4)
+
+
 if __name__ == "__main__":
-    build_toy_dataset_coco()
+    # build_toy_dataset_coco()
+    build_noisy_label_dataset_coco()
