@@ -187,7 +187,8 @@ def visualize_training_(gt_classes, loss, weights, input_images, storage):
 
     assert global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "L_BCAHW" or \
            global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "L_BAHW" or \
-           global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "L_B1HW"
+           global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "L_B1HW" or \
+           global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "L_BAHW_extendtobatch"
 
     def get_N_H_W(pred_class_logits):
         H = []
@@ -364,7 +365,8 @@ def visualize_per_image(data, gt_classes, loss, weights, input_images, storage):
 
     assert global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "L_BCAHW" or \
            global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "L_BAHW" or \
-           global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "L_B1HW"
+           global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "L_B1HW" or \
+           global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "L_BAHW_extendtobatch"
 
     def get_N_H_W(pred_class_logits):
         H = []

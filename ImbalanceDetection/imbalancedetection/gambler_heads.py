@@ -228,6 +228,20 @@ def calc_gambler_loss(valid_loss,
         cls_loss = list_N_AK_H_W_to_NsumHWA_K(cls_loss, num_classes=1)
         weights = gambler_heads.permute_all_weights_to_N_HWA_K_and_concat_(global_cfg, weights, num_classes=1,
                                                                            normalize_w=normalize_w)
+    elif gambler_output == "L_BAHW_extendtobatch":
+        cls_loss = reverse_list_N_A_K_H_W_to_NsumHWA_K_(valid_loss,
+                                                        in_layers,
+                                                        N,
+                                                        H,
+                                                        W,
+                                                        num_scale=len(global_cfg.MODEL.ANCHOR_GENERATOR.SIZES[0]),
+                                                        num_classes=num_classes)
+        # aggregate over classes
+        cls_loss = [torch.sum(l, dim=[2]) for l in cls_loss]
+        NAKHW_loss = [l.clone().detach() for l in cls_loss]
+        cls_loss = list_N_AK_H_W_to_NsumHWA_K(cls_loss, num_classes=1)
+        weights = gambler_heads.permute_all_weights_to_N_HWA_K_and_concat_(global_cfg, weights, num_classes=1,
+                                                                           normalize_w=normalize_w)
 
     gambler_loss = -(weights ** gamma) * cls_loss
     gambler_loss = gambler_loss.sum()
@@ -287,7 +301,10 @@ class GamblerHeads(torch.nn.Module):
         if normalize_w is True:
             sum_all_layers = 0
             for w in weights_flattened:
-                sum_all_layers = sum_all_layers + torch.sum(w, dim=[1, 2], keepdim=True)
+                if cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "L_BAHW_extendtobatch":
+                    sum_all_layers = sum_all_layers + torch.sum(w, dim=[0, 1, 2], keepdim=True)
+                else:
+                    sum_all_layers = sum_all_layers + torch.sum(w, dim=[1, 2], keepdim=True)
 
             weights_flattened = [w / sum_all_layers for w in weights_flattened]  # normalize by anchor, class and layer
         # concatenate on the first dimension (representing the feature levels), to
@@ -493,7 +510,8 @@ class LayeredUnetGambler(GamblerHeads):
         """
 
         assert self.cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "L_BAHW" or \
-               self.cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "L_B1HW", "does not support other shapes!"
+               self.cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "L_B1HW" or \
+               self.cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "L_BAHW_extendtobatch", "does not support other shapes!"
 
         def get_N_H_W(pred_class_logits):
             H = []
