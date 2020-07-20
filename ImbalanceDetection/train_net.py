@@ -37,6 +37,7 @@ from detectron2.utils.events import CommonMetricPrinter, JSONWriter, Tensorboard
 from torchvision.utils import make_grid
 import matplotlib.pyplot as plt
 from detectron2.utils.visualizer import Visualizer
+from imbalancedetection.gambler_heads import reverse_list_N_A_K_H_W_to_NsumHWA_K_
 
 def normalize_to_01(input):
     _max = torch.max(input)
@@ -185,7 +186,8 @@ def visualize_training_(gt_classes, loss, weights, input_images, storage):
     '''
 
     assert global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "L_BCAHW" or \
-           global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "L_BAHW"
+           global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "L_BAHW" or \
+           global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "L_B1HW"
 
     def get_N_H_W(pred_class_logits):
         H = []
@@ -234,6 +236,11 @@ def visualize_training_(gt_classes, loss, weights, input_images, storage):
             loss_layer, _ = loss_layer.max(dim=2, keepdim=False)  # max over all classes at every location
 
         loss_layer = normalize_to_01(loss_layer)
+
+        if global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT.find('A') == -1:  # If there is no A in it
+            loss_layer = loss_layer.expand(-1, 3, -1, -1)
+
+
         # if multiple scales
         # if multiple aspect ratios
         for j in range(anchor_scales):
@@ -247,7 +254,6 @@ def visualize_training_(gt_classes, loss, weights, input_images, storage):
 
     # Prepare ground truth *********************************************************************************************
 
-    from imbalancedetection.gambler_heads import reverse_list_N_A_K_H_W_to_NsumHWA_K_
     gt = reverse_list_N_A_K_H_W_to_NsumHWA_K_(gt_classes,
                                               global_cfg.MODEL.GAMBLER_HEAD.IN_LAYERS, #todo
                                               N,
@@ -284,13 +290,23 @@ def visualize_training_(gt_classes, loss, weights, input_images, storage):
     else:
         num_classes = 1
 
-    weights = reverse_list_N_A_K_H_W_to_NsumHWA_K_(weights,
-                                                   global_cfg.MODEL.GAMBLER_HEAD.IN_LAYERS,#todo
-                                                   N,
-                                                   H,
-                                                   W,
-                                                   num_scale=anchor_scales,
-                                                   num_classes=num_classes)
+    if global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT.find('A') == -1:  # If there is no A in it
+        weights = reverse_list_N_A_K_H_W_to_NsumHWA_K_(weights,
+                                                       global_cfg.MODEL.GAMBLER_HEAD.IN_LAYERS,  # todo
+                                                       N,
+                                                       H,
+                                                       W,
+                                                       num_scale=1,
+                                                       num_classes=num_classes)
+    else:
+        weights = reverse_list_N_A_K_H_W_to_NsumHWA_K_(weights,
+                                                       global_cfg.MODEL.GAMBLER_HEAD.IN_LAYERS,  # todo
+                                                       N,
+                                                       H,
+                                                       W,
+                                                       num_scale=anchor_scales,
+                                                       num_classes=num_classes)
+
     all_weights = []
     for weight_layer, i in zip(weights, global_cfg.MODEL.GAMBLER_HEAD.IN_LAYERS):
         # weights_folder = os.path.join(global_cfg.OUTPUT_DIR,
@@ -307,6 +323,11 @@ def visualize_training_(gt_classes, loss, weights, input_images, storage):
             weight_layer = torch.squeeze(weight_layer, dim=2)
 
         weight_layer_for_vis = normalize_to_01(weight_layer)
+
+        if global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT.find('A') == -1:  # If there is no A in it
+            weight_layer = weight_layer.expand(-1, 3, -1, -1)
+            weight_layer_for_vis = weight_layer_for_vis.expand(-1, 3, -1, -1)
+
         for j in range(anchor_scales):
             storage.put_hist(f"weights/layer{i}/scale{j}", weight_layer[:, None, j, :, :])
             img_weight = make_grid(weight_layer_for_vis[:, None, j, :, :], nrow=2, pad_value=1)
@@ -342,7 +363,8 @@ def visualize_per_image(data, gt_classes, loss, weights, input_images, storage):
     '''
 
     assert global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "L_BCAHW" or \
-           global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "L_BAHW"
+           global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "L_BAHW" or \
+           global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "L_B1HW"
 
     def get_N_H_W(pred_class_logits):
         H = []
@@ -408,14 +430,22 @@ def visualize_per_image(data, gt_classes, loss, weights, input_images, storage):
         num_classes = global_cfg.MODEL.GAMBLER_HEAD.NUM_CLASSES
     else:
         num_classes = 1
-
-    weights = reverse_list_N_A_K_H_W_to_NsumHWA_K_(weights,
-                                                   global_cfg.MODEL.GAMBLER_HEAD.IN_LAYERS,  # todo
-                                                   N,
-                                                   H,
-                                                   W,
-                                                   num_scale=anchor_scales,
-                                                   num_classes=num_classes)
+    if global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT.find('A') == -1:  # If there is no A in it
+        weights = reverse_list_N_A_K_H_W_to_NsumHWA_K_(weights,
+                                                       global_cfg.MODEL.GAMBLER_HEAD.IN_LAYERS,  # todo
+                                                       N,
+                                                       H,
+                                                       W,
+                                                       num_scale=1,
+                                                       num_classes=num_classes)
+    else:
+        weights = reverse_list_N_A_K_H_W_to_NsumHWA_K_(weights,
+                                                       global_cfg.MODEL.GAMBLER_HEAD.IN_LAYERS,  # todo
+                                                       N,
+                                                       H,
+                                                       W,
+                                                       num_scale=anchor_scales,
+                                                       num_classes=num_classes)
 
     for loss_layer, gt_layer, weight_layer, j in zip(loss, gt, weights, global_cfg.MODEL.GAMBLER_HEAD.IN_LAYERS):
 
@@ -440,6 +470,10 @@ def visualize_per_image(data, gt_classes, loss, weights, input_images, storage):
 
         weight_layer_for_vis = normalize_to_01(weight_layer)
 
+        if global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT.find('A') == -1:  # If there is no A in it
+            weight_layer = weight_layer.expand(-1, 3, -1, -1)
+            weight_layer_for_vis = weight_layer_for_vis.expand(-1, 3, -1, -1)
+            loss_layer = loss_layer.expand(-1, 3, -1, -1)
         # if multiple scales
         # if multiple aspect ratios
         for k in range(anchor_scales):
@@ -1190,7 +1224,7 @@ def main(args):
         return res
 
     trainer = GANTrainer(cfg)
-    trainer.resume_or_load(resume=args.resume)
+    # trainer.resume_or_load(resume=args.resume)
     return trainer.train()
 
 

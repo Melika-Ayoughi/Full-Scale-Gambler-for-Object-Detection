@@ -214,6 +214,20 @@ def calc_gambler_loss(valid_loss,
         cls_loss = list_N_AK_H_W_to_NsumHWA_K(cls_loss, num_classes=1)
         weights = gambler_heads.permute_all_weights_to_N_HWA_K_and_concat_(global_cfg, weights, num_classes=1,
                                                                            normalize_w=normalize_w)
+    elif gambler_output == "L_B1HW":
+        cls_loss = reverse_list_N_A_K_H_W_to_NsumHWA_K_(valid_loss,
+                                                        in_layers,
+                                                        N,
+                                                        H,
+                                                        W,
+                                                        num_scale=len(global_cfg.MODEL.ANCHOR_GENERATOR.SIZES[0]),
+                                                        num_classes=num_classes)
+        # aggregate over classes and anchors
+        cls_loss = [torch.sum(l, dim=[1, 2])[:, None, :, :] for l in cls_loss]
+        NAKHW_loss = [l.clone().detach() for l in cls_loss]
+        cls_loss = list_N_AK_H_W_to_NsumHWA_K(cls_loss, num_classes=1)
+        weights = gambler_heads.permute_all_weights_to_N_HWA_K_and_concat_(global_cfg, weights, num_classes=1,
+                                                                           normalize_w=normalize_w)
 
     gambler_loss = -(weights ** gamma) * cls_loss
     gambler_loss = gambler_loss.sum()
@@ -478,7 +492,8 @@ class LayeredUnetGambler(GamblerHeads):
             weights: normalized betting map
         """
 
-        assert self.cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "L_BAHW", "does not support other shapes!"
+        assert self.cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "L_BAHW" or \
+               self.cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT == "L_B1HW", "does not support other shapes!"
 
         def get_N_H_W(pred_class_logits):
             H = []

@@ -3,7 +3,8 @@ MODEL:
 #  WEIGHTS: "./output/retinanet_baselines/simple_retinanet/simple_retina_overfit/all_layers_3scales/model_final.pth"
 #  WEIGHTS: "./output/retinanet_baselines/simple_retinanet/simple_retina_overfit/all_layers_3scales_sublvis/model_0050999.pth"
 #  WEIGHTS: "./output/retinanet_baselines/simple_retinanet/simple_retina_fullcoco/not_long_enough_all_layers_3scales/model_final.pth"
-  WEIGHTS: "./output/retinanet_baselines/simple_retinanet/simple_retina_fullcoco/all_layers_3scales/model_final.pth"
+#  WEIGHTS: "./output/retinanet_baselines/simple_retinanet/simple_retina_fullcoco/all_layers_3scales/model_final.pth"
+  WEIGHTS: "detectron2://ImageNetPretrained/MSRA/R-50.pkl"
   RETINANET:
     NUM_CLASSES: 80
   ROI_HEADS:
@@ -14,15 +15,15 @@ MODEL:
     NAME: "LayeredUnetGambler"
     GAMBLER_ITERATIONS: 20
     DETECTOR_ITERATIONS: 40
-    GAMBLER_OUTPUT: "L_BAHW"
+    GAMBLER_OUTPUT: "L_B1HW"
     GAMBLER_KAPPA: 1
     GAMBLER_OUTSIDE_LAMBDA: 1.0
     GAMBLER_TEMPERATURE: 0.1 #1e-20 epsilon is needed for divide by 0
     GAMBLER_LOSS_MODE: "focal"
     DETECTOR_LOSS_MODE: "cls+reg-gambler"
-    GAMBLER_OUT_CHANNELS: 3
+    GAMBLER_OUT_CHANNELS: 1
     GAMBLER_IN_CHANNELS: 240
-    BASE_LR: 0.0001
+    BASE_LR: 0.01
     NORMALIZE: True
     BILINEAR_UPSAMPLING: False
     NUM_CLASSES: 80
@@ -37,7 +38,7 @@ MODEL:
 #    FIXED_CHANNEL: 64
     DATA_RANGE: [-128, 128] #random
 DATASETS:
-  TRAIN: ("coco_2017_train_1percent",)
+  TRAIN: ("coco_2017_train",)
 #  TEST: ("coco_2017_train_100samples",)
 #  TRAIN: ("coco_2017_train",)
   TEST: ("coco_2017_val",)
