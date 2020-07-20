@@ -37,7 +37,7 @@ MODEL:
 #    FIXED_CHANNEL: 64
     DATA_RANGE: [-128, 128] #random
 DATASETS:
-  TRAIN: ("coco_2017_train_1percent",)
+  TRAIN: ("coco_2017_train_10percent",)
 #  TEST: ("coco_2017_train_100samples",)
 #  TRAIN: ("coco_2017_train",)
   TEST: ("coco_2017_val",)

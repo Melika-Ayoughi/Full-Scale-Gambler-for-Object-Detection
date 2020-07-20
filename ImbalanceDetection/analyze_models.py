@@ -335,6 +335,10 @@ def main(args):
             # print_csv_format(results_ours_dict)
             # print_csv_format(results_baseline_dict)
 
+        if args.with_gambler:
+            raise Exception("not yet implemented!")
+
+
 
 if __name__ == "__main__":
     parser = default_argument_parser()
@@ -348,6 +352,7 @@ if __name__ == "__main__":
     parser.add_argument("--dir-ours", required=True, help="input directory of our model")
     parser.add_argument("--dir-baseline", required=True, help="input directory of baseline model")
     parser.add_argument("--sort", default="frequency", type=str, help="frequency, size, ap, class_entropy")
+    parser.add_argument("--with-gambler", action="store_true", help="if present: analyzes bettingmaps & ... ")
     args = parser.parse_args()
 
     metadata = MetadataCatalog.get(args.dataset)

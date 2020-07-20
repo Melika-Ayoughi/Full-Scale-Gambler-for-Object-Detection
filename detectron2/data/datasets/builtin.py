@@ -56,6 +56,11 @@ _PREDEFINED_SPLITS_COCO["coco"] = {
     "coco_2017_train_20percent": ("coco/train2017", "coco/annotations/instances_train2017_20percent.json"),
     "coco_2017_train_10noise_uniform": ("coco/train2017", "coco/annotations/instances_train2017_10noise_uniform.json"),
     "coco_2017_train_20noise_uniform": ("coco/train2017", "coco/annotations/instances_train2017_20noise_uniform.json"),
+    "coco_2017_train_50noise_uniform": ("coco/train2017", "coco/annotations/instances_train2017_50noise_uniform.json"),
+    "coco_2017_train_10noise_frequency": ("coco/train2017", "coco/annotations/instances_train2017_10noise_frequency.json"),
+    "coco_2017_train_20noise_frequency": ("coco/train2017", "coco/annotations/instances_train2017_20noise_frequency.json"),
+    "coco_2017_train_50noise_frequency": ("coco/train2017", "coco/annotations/instances_train2017_50noise_frequency.json"),
+    "coco_2017_train_LT": ("coco/train2017", "coco/annotations/instances_train2017_LT.json"),
 }
 
 _PREDEFINED_SPLITS_COCO["coco_person"] = {

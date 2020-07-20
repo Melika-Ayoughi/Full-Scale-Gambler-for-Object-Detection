@@ -1016,6 +1016,7 @@ class GANTrainer(TrainerBase):
         """
         # The checkpoint stores the training iteration that just finished, thus we start
         # at the next iteration (or iter zero if there's no checkpoint).
+        self.gambler_checkpointer.resume_or_load(self.cfg.MODEL.GAMBLER_HEAD.WEIGHTS, resume=resume)
         self.start_iter = (
                 self.detection_checkpointer.resume_or_load(self.cfg.MODEL.WEIGHTS, resume=resume).get(
                     "iteration", -1
@@ -1189,7 +1190,7 @@ def main(args):
         return res
 
     trainer = GANTrainer(cfg)
-    # trainer.resume_or_load(resume=args.resume)
+    trainer.resume_or_load(resume=args.resume)
     return trainer.train()
 
 
