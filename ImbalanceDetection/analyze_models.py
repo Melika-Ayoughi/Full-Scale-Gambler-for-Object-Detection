@@ -336,7 +336,36 @@ def main(args):
             # print_csv_format(results_baseline_dict)
 
         if args.with_gambler:
-            raise Exception("not yet implemented!")
+            train_data_loader = GANTrainer.build_train_loader(cfg)
+            import torch
+            with EventStorage(0) as storage:
+                with torch.no_grad():
+                    for inputs in train_data_loader:
+                        input_images, generated_output, gt_classes, loss_dict = detector_ours(inputs)
+                        gambler_loss_dict, weights, betting_map = gambler_ours(input_images,
+                                                                               generated_output['pred_class_logits'],
+                                                                               gt_classes,
+                                                                               detach_pred=False)  # (N,AK,H,W)
+
+
+                        from ImbalanceDetection.imbalancedetection.gambler_heads import list_N_AK_H_W_to_NsumHWA_K
+
+                        gt_classes = gt_classes.flatten() #torch.Size([37632])
+                        pred_class_logits = list_N_AK_H_W_to_NsumHWA_K(generated_output['pred_class_logits'], 80) #torch.Size([37632, 80])
+                        pred_class_sigmoids = (torch.sigmoid(pred_class_logits) - 0.5) * 256
+
+                        betting_map = list_N_AK_H_W_to_NsumHWA_K(betting_map, num_classes=1).flatten() # torch.Size([37632])
+                        weights = weights.flatten() # torch.Size([37632])
+                        loss_before_weighting = list_N_AK_H_W_to_NsumHWA_K(gambler_loss_dict['NAKHW_loss'], num_classes=1).flatten() # torch.Size([37632])
+
+                        for pred_class_sigmoid, gambler_score_bef, gambler_score_aft, matched_gt, loss in zip(pred_class_sigmoids, betting_map, weights, gt_classes, loss_before_weighting):
+                            print(pred_class_sigmoid.shape, gambler_score_bef.shape, gambler_score_aft.shape, matched_gt.shape, loss.shape)
+                            with open(os.path.join(cfg.OUTPUT_DIR, "statistics.csv"), "a") as my_csv:
+                                my_csv.write(f"img: {inputs[0]['file_name'].split('/')[-1]}"
+                                             f"\n")
+
+                            import ipdb; ipdb.set_trace()
+                            print("i'm here")
 
 
 
