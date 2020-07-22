@@ -29,6 +29,7 @@ import math
 import copy
 from collections import defaultdict
 import statistics
+import torch
 
 def create_instances(predictions, image_size):
     ret = Instances(image_size)
@@ -337,10 +338,20 @@ def main(args):
 
         if args.with_gambler:
             train_data_loader = GANTrainer.build_train_loader(cfg)
-            import torch
+
             with EventStorage(0) as storage:
                 with torch.no_grad():
-                    for inputs in train_data_loader:
+                    with open(os.path.join(args.output, "statistics.csv"), "a") as my_csv:
+                        my_csv.write(f"img, "
+                                     f"the highest score predicted, "
+                                     f"gambler score before normalization, "
+                                     f"gambler score after normalization, "
+                                     f"Gt id, "
+                                     f"predicted class id\n")
+
+                    for img_indx, inputs in enumerate(train_data_loader):
+                        if img_indx > 1000:
+                            break
                         input_images, generated_output, gt_classes, loss_dict = detector_ours(inputs)
                         gambler_loss_dict, weights, betting_map = gambler_ours(input_images,
                                                                                generated_output['pred_class_logits'],
@@ -351,22 +362,31 @@ def main(args):
                         from ImbalanceDetection.imbalancedetection.gambler_heads import list_N_AK_H_W_to_NsumHWA_K
 
                         gt_classes = gt_classes.flatten() #torch.Size([37632])
-                        pred_class_logits = list_N_AK_H_W_to_NsumHWA_K(generated_output['pred_class_logits'], 80) #torch.Size([37632, 80])
+                        pred_class_logits = list_N_AK_H_W_to_NsumHWA_K(generated_output['pred_class_logits'], cfg.MODEL.RETINANET.NUM_CLASSES) #torch.Size([37632, 80])
                         pred_class_sigmoids = (torch.sigmoid(pred_class_logits) - 0.5) * 256
 
                         betting_map = list_N_AK_H_W_to_NsumHWA_K(betting_map, num_classes=1).flatten() # torch.Size([37632])
                         weights = weights.flatten() # torch.Size([37632])
                         loss_before_weighting = list_N_AK_H_W_to_NsumHWA_K(gambler_loss_dict['NAKHW_loss'], num_classes=1).flatten() # torch.Size([37632])
 
-                        for pred_class_sigmoid, gambler_score_bef, gambler_score_aft, matched_gt, loss in zip(pred_class_sigmoids, betting_map, weights, gt_classes, loss_before_weighting):
-                            print(pred_class_sigmoid.shape, gambler_score_bef.shape, gambler_score_aft.shape, matched_gt.shape, loss.shape)
-                            with open(os.path.join(cfg.OUTPUT_DIR, "statistics.csv"), "a") as my_csv:
-                                my_csv.write(f"img: {inputs[0]['file_name'].split('/')[-1]}"
-                                             f"\n")
+                        foreground_idxs = (gt_classes >= 0) & (gt_classes != cfg.MODEL.RETINANET.NUM_CLASSES)
+                        filtered_anchor_ind = foreground_idxs & (loss_before_weighting >= (0.1 * loss_before_weighting.max()))
+                        print(f"number of filtered anchors to be displayed: {filtered_anchor_ind.sum()}")
 
-                            import ipdb; ipdb.set_trace()
-                            print("i'm here")
+                        f_betting_map = betting_map[filtered_anchor_ind]
+                        f_weights = weights[filtered_anchor_ind]
+                        f_gt_classes = gt_classes[filtered_anchor_ind]
+                        f_pred_class_sigmoids = pred_class_sigmoids[filtered_anchor_ind, :]
 
+                        #  for over all chosen anchors
+                        for pred_class_sigmoid, gambler_score_bef, gambler_score_aft, matched_gt in zip(f_pred_class_sigmoids, f_betting_map, f_weights, f_gt_classes):
+                            with open(os.path.join(args.output, "statistics.csv"), "a") as my_csv:
+                                my_csv.write(f"{inputs[0]['file_name'].split('/')[-1]}, "
+                                             f"{pred_class_sigmoid.max()}, "
+                                             f"{gambler_score_bef}, "
+                                             f"{gambler_score_aft}, "
+                                             f"{matched_gt}, "
+                                             f"{pred_class_sigmoid.argmax()}\n")
 
 
 if __name__ == "__main__":
