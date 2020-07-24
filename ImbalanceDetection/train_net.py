@@ -349,7 +349,7 @@ def visualize_training_(gt_classes, loss, weights, input_images, storage):
     #                                      input_grid=input_grid, heatmap_mode=False)
 
 
-def visualize_per_image(data, gt_classes, loss, weights, input_images, storage):
+def visualize_per_image(data, gt_classes, loss, weights, input_images, mask, storage):
     '''
 
     Args:
@@ -428,6 +428,14 @@ def visualize_per_image(data, gt_classes, loss, weights, input_images, storage):
                                               num_scale=anchor_scales,
                                               num_classes=1)
 
+    mask = reverse_list_N_A_K_H_W_to_NsumHWA_K_(mask,
+                                              global_cfg.MODEL.GAMBLER_HEAD.IN_LAYERS,  # todo
+                                              N,
+                                              H,
+                                              W,
+                                              num_scale=anchor_scales,
+                                              num_classes=1)
+
     if global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT.find('C') != -1:  # If there is a C in it
         num_classes = global_cfg.MODEL.GAMBLER_HEAD.NUM_CLASSES
     else:
@@ -449,7 +457,7 @@ def visualize_per_image(data, gt_classes, loss, weights, input_images, storage):
                                                        num_scale=anchor_scales,
                                                        num_classes=num_classes)
 
-    for loss_layer, gt_layer, weight_layer, j in zip(loss, gt, weights, global_cfg.MODEL.GAMBLER_HEAD.IN_LAYERS):
+    for loss_layer, gt_layer, mask_layer, weight_layer, j in zip(loss, gt, mask, weights, global_cfg.MODEL.GAMBLER_HEAD.IN_LAYERS):
 
         if global_cfg.MODEL.GAMBLER_HEAD.GAMBLER_OUTPUT.find('C') != -1:  # If there is a C in it
             # loss_layer = torch.sum(loss_layer, dim=2)  # aggregate per class loss
@@ -482,11 +490,12 @@ def visualize_per_image(data, gt_classes, loss, weights, input_images, storage):
             storage.put_hist(f"weights/layer{j}/scale{k}", weight_layer[:, None, k, :, :])
             for i in range(N):
                 all.append(extend_to_rgb(gt_layer[i, k, :, :]))
+                all.append(extend_to_rgb(mask_layer[i, k, :, :].type(dtype=torch.float32)))
                 all.append(extend_to_rgb(loss_layer[i, k, :, :]))
                 all.append(extend_to_rgb(weight_layer_for_vis[i, k, :, :]))
-                output(make_grid(all, nrow=3, pad_value=1).permute(1, 2, 0).cpu().numpy(),
+                output(make_grid(all, nrow=4, pad_value=1).permute(1, 2, 0).cpu().numpy(),
                        os.path.join(img_folder, f"iter_{str(storage.iter)}_img_{i}_layer{j}_scale{k}.png"))
-                storage.put_image(f"iter_{str(storage.iter)}_img_{i}_layer{j}_scale{k}", make_grid(all, nrow=3, pad_value=1))
+                storage.put_image(f"iter_{str(storage.iter)}_img_{i}_layer{j}_scale{k}", make_grid(all, nrow=4, pad_value=1))
                 all.clear()
 
 
@@ -1130,15 +1139,16 @@ class GANTrainer(TrainerBase):
         if self.iter_G < self.max_iter_gambler:
             logger.info(f"Iteration {self.iter} in Gambler")
             with torch.no_grad():
-                input_images, generated_output, gt_classes, loss_dict = self.detection_model(data)
+                input_images, generated_output, gt_classes, mask, loss_dict = self.detection_model(data)
             gambler_loss_dict, weights, betting_map = self.gambler_model(input_images,
                                                                          generated_output['pred_class_logits'],
                                                                          gt_classes,
+                                                                         mask,
                                                                          detach_pred=True)  # (N,AK,H,W)
 
             if self.vis_period > 0 and self.storage.iter % self.vis_period == 0:
                 visualize_per_image(data, gt_classes.clone().detach(), gambler_loss_dict["NAKHW_loss"],
-                                    weights, input_images, self.storage)
+                                    weights, input_images, mask, self.storage)
                 visualize_training_(gt_classes.clone().detach(), gambler_loss_dict["NAKHW_loss"],
                                     weights, input_images, self.storage)
 
@@ -1156,15 +1166,16 @@ class GANTrainer(TrainerBase):
 
         elif self.iter_D < self.max_iter_detector:
             logger.info(f"Iteration {self.iter} in Detector")
-            input_images, generated_output, gt_classes, loss_dict = self.detection_model(data)
+            input_images, generated_output, gt_classes, mask, loss_dict = self.detection_model(data)
             gambler_loss_dict, weights, betting_map = self.gambler_model(input_images,
                                                                          generated_output['pred_class_logits'],
                                                                          gt_classes,
+                                                                         mask,
                                                                          detach_pred=False)  # (N,AK,H,W)
 
             if self.vis_period > 0 and self.storage.iter % self.vis_period == 0:
                 visualize_per_image(data, gt_classes.clone().detach(), gambler_loss_dict["NAKHW_loss"],
-                                    weights, input_images, self.storage)
+                                    weights, input_images, mask, self.storage)
                 visualize_training_(gt_classes.clone().detach(), gambler_loss_dict["NAKHW_loss"],
                                     weights, input_images, self.storage)
 

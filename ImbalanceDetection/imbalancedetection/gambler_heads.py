@@ -467,13 +467,14 @@ class LayeredUnetGambler(GamblerHeads):
 
         self.to(self.device)
 
-    def forward(self, image, pred_class_logits, gt_classes, detach_pred):
+    def forward(self, image, pred_class_logits, gt_classes, mask, detach_pred):
         """
 
         Args:
             image: the image batch tensor
             pred_class_logits:
             gt_classes:
+            mask:
             detach_pred:
 
         Returns:
@@ -490,16 +491,17 @@ class LayeredUnetGambler(GamblerHeads):
         pred = self.pregamblerpredictions(input)
         out1 = self.layered_gambler(pred, im)  # out1 = ['p7', 'p6', 'p5', 'p4', 'p3']
         betting_map = self.postgamblerpredictions(out1)  # out2 = ['p3', 'p4', 'p5', 'p6', 'p7']
-        loss_dict, weights = self.gambler_loss(pred_class_logits, betting_map, gt_classes, detach_pred=detach_pred)
+        loss_dict, weights = self.gambler_loss(pred_class_logits, betting_map, gt_classes, mask, detach_pred=detach_pred)
 
         return loss_dict, weights, betting_map
 
-    def gambler_loss(self, pred_class_logits, weights, gt_classes, detach_pred=False):
+    def gambler_loss(self, pred_class_logits, weights, gt_classes, mask, detach_pred=False):
         """
         Args:
             pred_class_logits: list of tensors, each tensor is [batch, #class_categories * anchors per location, w, h]
             weights: [batch, #anchors per location/#classes/ classes*anchors per location, w, h]
             gt_classes: [batch, #all_anchors = w * h * anchors per location]
+            mask: [batch, #all_anchors = w * h * anchors per location]
             detach_pred: if True predictions are detached from the computation graph (for gambler training)
 
         Returns:
@@ -549,6 +551,19 @@ class LayeredUnetGambler(GamblerHeads):
         valid_loss[valid_idxs, :] = cls_loss[valid_idxs, :]
 
         gambler_heads = GamblerHeads(self.cfg)
+        #  mask out parts of gambler bets for the loss (for low quality anchors)
+
+        mask = reverse_list_N_A_K_H_W_to_NsumHWA_K_(mask,
+                                                    global_cfg.MODEL.GAMBLER_HEAD.IN_LAYERS,
+                                                    N,
+                                                    H,
+                                                    W,
+                                                    num_scale=3,
+                                                    num_classes=1)
+        # weights = weights * mask
+        for i, mask_layer in enumerate(mask):
+            weights[i] = weights[i] * mask_layer.squeeze()
+
         gambler_loss, NAKHW_loss, weights = calc_gambler_loss(valid_loss,
                                                               weights,
                                                               N,

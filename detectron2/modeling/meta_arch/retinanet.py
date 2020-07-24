@@ -93,7 +93,11 @@ class RetinaNet(nn.Module):
             cfg.MODEL.RETINANET.IOU_LABELS,
             allow_low_quality_matches=True,
         )
-
+        self.picky_matcher = Matcher(
+            [0.39, 0.4],
+            cfg.MODEL.RETINANET.IOU_LABELS,
+            allow_low_quality_matches=True,
+        )
         pixel_mean = torch.Tensor(cfg.MODEL.PIXEL_MEAN).to(self.device).view(3, 1, 1)
         pixel_std = torch.Tensor(cfg.MODEL.PIXEL_STD).to(self.device).view(3, 1, 1)
         self.normalizer = lambda x: (x - pixel_mean) / pixel_std
@@ -136,7 +140,9 @@ class RetinaNet(nn.Module):
 
         if self.training:
             gt_classes, gt_anchors_reg_deltas = self.get_ground_truth(anchors, gt_instances)
-            return images.tensor, {"pred_class_logits": box_cls, "pred_proposal_deltas": box_delta}, gt_classes, \
+            mask = self.get_picky_ground_truth(anchors, gt_instances)
+
+            return images.tensor, {"pred_class_logits": box_cls, "pred_proposal_deltas": box_delta}, gt_classes, mask, \
                    self.losses(gt_classes, gt_anchors_reg_deltas, box_cls, box_delta)
         else:
             results = self.inference(box_cls, box_delta, anchors, images)
@@ -360,6 +366,67 @@ class RetinaNet(nn.Module):
             gt_anchors_deltas.append(gt_anchors_reg_deltas_i)
 
         return torch.stack(gt_classes), torch.stack(gt_anchors_deltas)
+
+    @torch.no_grad()
+    def get_picky_ground_truth(self, anchors, targets):
+        """
+        Args:
+            anchors (list[list[Boxes]]): a list of N=#image elements. Each is a
+                list of #feature level Boxes. The Boxes contains anchors of
+                this image on the specific feature level.
+            targets (list[Instances]): a list of N `Instances`s. The i-th
+                `Instances` contains the ground-truth per-instance annotations
+                for the i-th input image.  Specify `targets` during training only.
+
+        Returns:
+            gt_classes (Tensor):
+                An integer tensor of shape (N, R) storing ground-truth
+                labels for each anchor.
+                R is the total number of anchors, i.e. the sum of Hi x Wi x A for all levels.
+                Anchors with an IoU with some target higher than the foreground threshold
+                are assigned their corresponding label in the [0, K-1] range.
+                Anchors whose IoU are below the background threshold are assigned
+                the label "K". Anchors whose IoU are between the foreground and background
+                thresholds are assigned a label "-1", i.e. ignore.
+            gt_anchors_deltas (Tensor):
+                Shape (N, R, 4).
+                The last dimension represents ground-truth box2box transform
+                targets (dx, dy, dw, dh) that map each anchor to its matched ground-truth box.
+                The values in the tensor are meaningful only when the corresponding
+                anchor is labeled as foreground.
+        """
+        gt_classes = []
+        gt_anchors_deltas = []
+        anchors = [Boxes.cat(anchors_i) for anchors_i in anchors]
+        # list[Tensor(R, 4)], one for each image
+
+        for anchors_per_image, targets_per_image in zip(anchors, targets):
+            match_quality_matrix = pairwise_iou(targets_per_image.gt_boxes, anchors_per_image)
+            gt_matched_idxs, anchor_labels = self.picky_matcher(match_quality_matrix)
+
+            has_gt = len(targets_per_image) > 0
+            if has_gt:
+                # ground truth box regression
+                matched_gt_boxes = targets_per_image.gt_boxes[gt_matched_idxs]
+                gt_anchors_reg_deltas_i = self.box2box_transform.get_deltas(
+                    anchors_per_image.tensor, matched_gt_boxes.tensor
+                )
+
+                gt_classes_i = targets_per_image.gt_classes[gt_matched_idxs]
+                # Anchors with label 0 are treated as background.
+                gt_classes_i[anchor_labels == 0] = 0
+                # Anchors with label 1 are treated as foreground.
+                gt_classes_i[anchor_labels == 1] = 1
+                # Anchors with label -1 are ignored.
+                # if (anchor_labels == -1).any():
+                #     # definitely wrong to set them to background, they should be ignored
+                gt_classes_i[anchor_labels == -1] = 0
+            else:
+                gt_classes_i = torch.zeros_like(gt_matched_idxs) + self.num_classes
+
+            gt_classes.append(gt_classes_i)
+
+        return torch.stack(gt_classes)
 
     def inference(self, box_cls, box_delta, anchors, images):
         """
