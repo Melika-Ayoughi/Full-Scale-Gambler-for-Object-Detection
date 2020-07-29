@@ -94,7 +94,7 @@ class RetinaNet(nn.Module):
             allow_low_quality_matches=True,
         )
         self.picky_matcher = Matcher(
-            [0.39, 0.4],
+            [0.4, 0.9],
             cfg.MODEL.RETINANET.IOU_LABELS,
             allow_low_quality_matches=True,
         )

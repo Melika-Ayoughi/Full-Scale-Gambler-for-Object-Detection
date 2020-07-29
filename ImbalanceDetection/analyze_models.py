@@ -192,7 +192,7 @@ def main(args):
     detector_ours = build_detector(cfg)
     gambler_ours = build_gambler(cfg)
     DetectionCheckpointer(detector_ours, save_dir=cfg.OUTPUT_DIR).resume_or_load(
-        os.path.join(args.dir_ours, "model_final.pth"), resume=args.resume
+        os.path.join(args.dir_ours, "model_0099999.pth"), resume=args.resume
     )
     # DetectionCheckpointer(gambler_ours, save_dir=cfg.OUTPUT_DIR).resume_or_load(
     #     os.path.join(args.dir_ours, "gambler_models/model_final.pth"), resume=args.resume
@@ -212,7 +212,7 @@ def main(args):
 
     for idx, dataset_name in enumerate(cfg.DATASETS.TEST):
         test_data_loader = GANTrainer.build_test_loader(cfg, dataset_name)
-        # train_data_loader = GANTrainer.build_train_loader(cfg)
+        train_data_loader = GANTrainer.build_train_loader(cfg)
 
         evaluator_ours = GANTrainer.build_evaluator(cfg, dataset_name, os.path.join(args.dir_ours, "inference"))
         evaluator_baseline = GANTrainer.build_evaluator(cfg, dataset_name, os.path.join(args.dir_baseline, "inference"))
@@ -338,46 +338,56 @@ def main(args):
             # print_csv_format(results_baseline_dict)
 
         if args.with_gambler:
-            train_data_loader = GANTrainer.build_train_loader(cfg)
 
             with EventStorage(0) as storage:
                 with torch.no_grad():
-                    with open(os.path.join(args.output, "statistics_gambler_fg.csv"), "a") as my_csv:
-                        my_csv.write(f"img, "
-                                     f"the highest score predicted, "
-                                     f"gambler score before normalization, "
-                                     f"gambler score after normalization, "
-                                     f"Gt id, "
-                                     f"predicted class id, "
-                                     f"loss\n")
-                    with open(os.path.join(args.output, "statistics_gambler_highloss.csv"), "a") as my_csv:
-                        my_csv.write(f"img, "
-                                     f"the highest score predicted, "
-                                     f"gambler score before normalization, "
-                                     f"gambler score after normalization, "
-                                     f"Gt id, "
-                                     f"predicted class id, "
-                                     f"loss\n")
-                    with open(os.path.join(args.output, "statistics_baseline_fg.csv"), "a") as my_csv:
-                        my_csv.write(f"img, "
-                                     f"the highest score predicted, "
-                                     f"Gt id, "
-                                     f"predicted class id, "
-                                     f"loss\n")
+                    # with open(os.path.join(args.output, "statistics_gambler_fg.csv"), "a") as my_csv:
+                    #     my_csv.write(f"img, "
+                    #                  f"the highest score predicted, "
+                    #                  f"gambler score before normalization, "
+                    #                  f"gambler score after normalization, "
+                    #                  f"Gt id, "
+                    #                  f"predicted class id, "
+                    #                  f"loss\n")
+                    # with open(os.path.join(args.output, "statistics_gambler_highloss.csv"), "a") as my_csv:
+                    #     my_csv.write(f"img, "
+                    #                  f"the highest score predicted, "
+                    #                  f"gambler score before normalization, "
+                    #                  f"gambler score after normalization, "
+                    #                  f"Gt id, "
+                    #                  f"predicted class id, "
+                    #                  f"loss\n")
+                    # with open(os.path.join(args.output, "statistics_baseline_fg.csv"), "a") as my_csv:
+                    #     my_csv.write(f"img, "
+                    #                  f"the highest score predicted, "
+                    #                  f"Gt id, "
+                    #                  f"predicted class id, "
+                    #                  f"loss\n")
                     # with open(os.path.join(args.output, "statistics_baseline_highloss.csv"), "a") as my_csv:
                     #     my_csv.write(f"img, "
                     #                  f"the highest score predicted, "
                     #                  f"Gt id, "
                     #                  f"predicted class id, "
                     #                  f"loss\n")
+                    with torch.no_grad():
+                        with open(os.path.join(args.output, f"{args.dir_ours.split('/')[-2]}_one_image_allanchors.csv"), "a") as my_csv:
+                            my_csv.write(f"img, "
+                                         f"the highest score predicted, "
+                                         f"gambler score before normalization, "
+                                         f"gambler score after normalization, "
+                                         f"Gt id, "
+                                         f"predicted class id, "
+                                         f"loss\n")
 
                     for img_indx, inputs in enumerate(train_data_loader):
-                        if img_indx > 100:
-                            break
-                        input_images, generated_output, gt_classes, loss_dict = detector_ours(inputs)
+                        # if img_indx > 2:
+                        #     break
+                        input_images, generated_output, gt_classes, _, loss_dict = detector_ours(inputs)
+                        mask = torch.ones_like(gt_classes)
                         gambler_loss_dict, weights, betting_map = gambler_ours(input_images,
                                                                                generated_output['pred_class_logits'],
                                                                                gt_classes,
+                                                                               mask,
                                                                                detach_pred=False)  # (N,AK,H,W)
 
 
@@ -392,19 +402,19 @@ def main(args):
                         weights = weights.flatten() # torch.Size([37632])
                         loss_before_weighting = list_N_AK_H_W_to_NsumHWA_K(gambler_loss_dict['NAKHW_loss'], num_classes=1).flatten() # torch.Size([37632])
 
-                        foreground_idxs = (gt_classes >= 0) & (gt_classes != cfg.MODEL.RETINANET.NUM_CLASSES)
-                        filtered_anchor_ind = foreground_idxs
-                        print(f"number of filtered anchors to be displayed: {filtered_anchor_ind.sum()}")
-
-                        f_betting_map = betting_map[filtered_anchor_ind]
-                        f_weights = weights[filtered_anchor_ind]
-                        f_gt_classes = gt_classes[filtered_anchor_ind]
-                        f_pred_class_sigmoids = pred_class_sigmoids[filtered_anchor_ind, :]
-                        f_loss_before_weighting = loss_before_weighting[filtered_anchor_ind]
+                        # foreground_idxs = (gt_classes >= 0) & (gt_classes != cfg.MODEL.RETINANET.NUM_CLASSES)
+                        # filtered_anchor_ind = foreground_idxs
+                        # print(f"number of filtered anchors to be displayed: {filtered_anchor_ind.sum()}")
+                        #
+                        # f_betting_map = betting_map[filtered_anchor_ind]
+                        # f_weights = weights[filtered_anchor_ind]
+                        # f_gt_classes = gt_classes[filtered_anchor_ind]
+                        # f_pred_class_sigmoids = pred_class_sigmoids[filtered_anchor_ind, :]
+                        # f_loss_before_weighting = loss_before_weighting[filtered_anchor_ind]
 
                         #  for over all chosen anchors
-                        for pred_class_sigmoid, gambler_score_bef, gambler_score_aft, matched_gt, loss in zip(f_pred_class_sigmoids, f_betting_map, f_weights, f_gt_classes, f_loss_before_weighting):
-                            with open(os.path.join(args.output, "statistics_gambler_fg.csv"), "a") as my_csv:
+                        for pred_class_sigmoid, gambler_score_bef, gambler_score_aft, matched_gt, loss in zip(pred_class_sigmoids, betting_map, weights, gt_classes, loss_before_weighting):
+                            with open(os.path.join(args.output, f"{args.dir_ours.split('/')[-2]}_one_image_allanchors.csv"), "a") as my_csv:
                                 my_csv.write(f"{inputs[0]['file_name'].split('/')[-1]}, "
                                              f"{pred_class_sigmoid.max()}, "
                                              f"{gambler_score_bef}, "
@@ -414,26 +424,26 @@ def main(args):
                                              f"{loss}\n")
 
                         # foreground_idxs = (gt_classes >= 0) & (gt_classes != cfg.MODEL.RETINANET.NUM_CLASSES)
-                        filtered_anchor_ind = (loss_before_weighting >= (0.1 * loss_before_weighting.max()))
-                        print(f"number of filtered anchors to be displayed: {filtered_anchor_ind.sum()}")
-
-                        f_betting_map = betting_map[filtered_anchor_ind]
-                        f_weights = weights[filtered_anchor_ind]
-                        f_gt_classes = gt_classes[filtered_anchor_ind]
-                        f_pred_class_sigmoids = pred_class_sigmoids[filtered_anchor_ind, :]
-                        f_loss_before_weighting = loss_before_weighting[filtered_anchor_ind]
-
-                        #  for over all chosen anchors
-                        for pred_class_sigmoid, gambler_score_bef, gambler_score_aft, matched_gt, loss in zip(
-                                f_pred_class_sigmoids, f_betting_map, f_weights, f_gt_classes, f_loss_before_weighting):
-                            with open(os.path.join(args.output, "statistics_gambler_highloss.csv"), "a") as my_csv:
-                                my_csv.write(f"{inputs[0]['file_name'].split('/')[-1]}, "
-                                             f"{pred_class_sigmoid.max()}, "
-                                             f"{gambler_score_bef}, "
-                                             f"{gambler_score_aft}, "
-                                             f"{matched_gt}, "
-                                             f"{pred_class_sigmoid.argmax()}, "
-                                             f"{loss}\n")
+                        # filtered_anchor_ind = (loss_before_weighting >= (0.1 * loss_before_weighting.max()))
+                        # print(f"number of filtered anchors to be displayed: {filtered_anchor_ind.sum()}")
+                        #
+                        # f_betting_map = betting_map[filtered_anchor_ind]
+                        # f_weights = weights[filtered_anchor_ind]
+                        # f_gt_classes = gt_classes[filtered_anchor_ind]
+                        # f_pred_class_sigmoids = pred_class_sigmoids[filtered_anchor_ind, :]
+                        # f_loss_before_weighting = loss_before_weighting[filtered_anchor_ind]
+                        #
+                        # #  for over all chosen anchors
+                        # for pred_class_sigmoid, gambler_score_bef, gambler_score_aft, matched_gt, loss in zip(
+                        #         f_pred_class_sigmoids, f_betting_map, f_weights, f_gt_classes, f_loss_before_weighting):
+                        #     with open(os.path.join(args.output, "statistics_gambler_highloss.csv"), "a") as my_csv:
+                        #         my_csv.write(f"{inputs[0]['file_name'].split('/')[-1]}, "
+                        #                      f"{pred_class_sigmoid.max()}, "
+                        #                      f"{gambler_score_bef}, "
+                        #                      f"{gambler_score_aft}, "
+                        #                      f"{matched_gt}, "
+                        #                      f"{pred_class_sigmoid.argmax()}, "
+                        #                      f"{loss}\n")
 
                         ##############################################################################################
 
@@ -486,6 +496,24 @@ def main(args):
                         #                      f"{matched_gt}, "
                         #                      f"{pred_class_sigmoid.argmax()}, "
                         #                      f"{loss}\n")
+                        break
+
+        if args.vis_bets:
+            from train_net import visualize_training_
+            with torch.no_grad():
+                with EventStorage(0) as storage:
+                    for img_indx, inputs in enumerate(train_data_loader):
+                        # if img_indx > 2:
+                        #     break
+                        input_images, generated_output, gt_classes, _, loss_dict = detector_ours(inputs)
+                        mask = torch.ones_like(gt_classes)
+                        gambler_loss_dict, weights, betting_map = gambler_ours(input_images,
+                                                                               generated_output['pred_class_logits'],
+                                                                               gt_classes,
+                                                                               mask,
+                                                                               detach_pred=False)  # (N,AK,H,W)
+                        visualize_training_(gt_classes.clone().detach(), gambler_loss_dict["NAKHW_loss"],
+                                            weights, input_images, storage)
 
 
 if __name__ == "__main__":
@@ -501,6 +529,7 @@ if __name__ == "__main__":
     parser.add_argument("--dir-baseline", required=True, help="input directory of baseline model")
     parser.add_argument("--sort", default="frequency", type=str, help="frequency, size, ap, class_entropy")
     parser.add_argument("--with-gambler", action="store_true", help="if present: analyzes bettingmaps & ... ")
+    parser.add_argument("--vis-bets", action="store_true", help="if present: visualizes bettingmaps & ... ")
     args = parser.parse_args()
 
     metadata = MetadataCatalog.get(args.dataset)

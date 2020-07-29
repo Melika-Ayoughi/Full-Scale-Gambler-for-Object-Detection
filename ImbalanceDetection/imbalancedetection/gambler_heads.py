@@ -14,17 +14,21 @@ from detectron2.config import global_cfg
 logger = logging.getLogger(__name__)
 
 
-def get_loss_upper_bound(nakhw, N):
+def get_loss_upper_bound(nakhw, N, smoothing, kappa):
     max_loss = torch.empty(N, 5)
     assert len(nakhw) == 5, "only works with 5 fpn layers"
 
+    normalized_by_num_anchors = 0
     for i, layer in enumerate(nakhw):  # torch.Size([8, 3, 80, 5, 5])
+        # print(layer.shape[1] * layer.shape[2] * layer.shape[3])
+        normalized_by_num_anchors += layer.shape[1] * layer.shape[2] * layer.shape[3]
         while len(layer.shape) > 1:
             layer, _ = layer.max(dim=1, keepdim=False)  # torch.Size([8])
         max_loss[:, i] = layer.data
     max_loss, _ = max_loss.max(dim=1, keepdim=False)  # torch.Size([8, 5]) -> torch.Size([8])
     # print(max_loss, torch.sum(max_loss))
-    return torch.sum(max_loss)
+    w_max = (1 + smoothing)/(normalized_by_num_anchors * smoothing + 1)
+    return kappa * w_max * N * max_loss.sum()
 
 
 def N_AK_H_W_to_N_HWA_K(tensor, K):
@@ -577,8 +581,10 @@ class LayeredUnetGambler(GamblerHeads):
                                                               gamma=self.gamma)
 
         storage = get_event_storage()
-        storage.put_scalar("loss_gambler/lower_bound", -get_loss_upper_bound(NAKHW_loss, N))
-
+        storage.put_scalar("loss_gambler/lower_bound", -get_loss_upper_bound(NAKHW_loss,
+                                                                             N,
+                                                                             self.cfg.MODEL.GAMBLER_HEAD.GAMBLER_TEMPERATURE,
+                                                                             self.cfg.MODEL.GAMBLER_HEAD.GAMBLER_KAPPA))
 
         if self.mode == "focal":
             loss_before_weighting = [loss.sum() for loss in NAKHW_loss]
